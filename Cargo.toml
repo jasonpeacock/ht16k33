@@ -1,0 +1,10 @@
+[package]
+name = "ht16k33"
+version = "0.1.0"
+authors = ["Jason Peacock <jason@jasonpeacock.com>"]
+
+[dependencies]
+i2cdev        = "0.4.0"
+num-integer   = "0.1.39"
+slog          = "2.4.1"
+slog-stdlog   = "3.0.4-pre"
