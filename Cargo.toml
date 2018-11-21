@@ -2,6 +2,12 @@
 name = "ht16k33"
 version = "0.1.0"
 authors = ["Jason Peacock <jason@jasonpeacock.com>"]
+description = "Rust driver for the Holtek HT16K33 'RAM Mapping 16*8 LED Controller Driver with keyscan'"
+keywords = ["led", "gpio", "driver"]
+categories = ["hardware-support"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/jasonpeacock/ht16k33"
+readme = "README.md"
 
 [dependencies]
 i2cdev        = "0.4.0"
