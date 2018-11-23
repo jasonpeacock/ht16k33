@@ -1,0 +1,55 @@
+language: rust
+cache: cargo
+rust:
+    # Supported Rust versions.
+    - stable
+    - beta
+    - nightly
+    # Oldest supported Rust version.
+    - 1.24.0
+os:
+    # OSX is explicitly `include`d in the matrix below as we don't need to build
+    # all the linux 32/64+gnu/musl combinations for it.
+    - linux
+env:
+    matrix:
+        - TARGET=x86_64-unknown-linux-gnu
+        - TARGET=x86_64-unknown-linux-musl
+        - TARGET=i686-unknown-linux-gnu
+        - TARGET=i686-unknown-linux-musl
+    global:
+        # Default target on `travis-ci`, used as conditional check in the `install` stage.
+        - HOST=x86_64-unknown-linux-gnu
+
+matrix:
+    allow_failures:
+        - rust: nightly
+          fast_finish: true
+    include:
+        - os: osx
+          rust: stable
+          env: TARGET=x86_64-apple-darwin
+        - os: osx
+          rust: beta
+          env: TARGET=x86_64-apple-darwin
+        - os: osx
+          rust: nightly
+          env: TARGET=x86_64-apple-darwin
+        - os: osx
+          rust: 1.24.0
+          env: TARGET=x86_64-apple-darwin
+
+addons:
+    apt:
+        packages:
+            # Needed for i686-unknown-linux-gnu target.
+            - gcc-multilib
+
+install:
+    # Prevent target re-add error from `rustup` by not adding the default target on `travis-ci`.
+    - if [[ $TRAVIS_OS_NAME = linux && $HOST != $TARGET ]]; then rustup target add $TARGET; fi
+
+script:
+    # Incorporate `TARGET` env var to the build and test process.
+    - cargo build --target $TARGET --verbose
+    - cargo test --target $TARGET --verbose
