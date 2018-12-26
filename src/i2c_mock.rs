@@ -1,47 +1,42 @@
 //! # i2c_mock
 //!
 //! A mock I2C library to support using the [HT16K33](../struct.HT16K33.html) driver on non-Linux systems that do
-//! not have I2CDevice support.
-//!
-//! Original implementation: https://github.com/rust-embedded/rust-i2cdev/blob/master/src/mock.rs
+//! not have I2C support.
 extern crate embedded_hal as hal;
-
-use std::error;
-use std::fmt;
-use std::result;
 
 use slog::Drain;
 use slog::Logger;
 use slog_stdlog::StdLog;
 
-pub type I2CResult<T> = result::Result<T, I2cMockError>;
+use constants::ROWS_SIZE;
+use types::DisplayDataAddress;
 
-/// Emulate the HT16K33 device behaviors.
-pub const ROWS_SIZE: usize = 16;
-pub const DATA_ADDRESS: u8 = 0b0000_0000;
-
-pub struct I2cMock {
-    pub data_values: [u8; ROWS_SIZE],
-    logger: Logger,
-}
-
-#[derive(Debug)]
+/// Mock error to satisfy the I2C trait.
+#[derive(Debug, Fail)]
+#[fail(display = "I2cMock Error")]
 pub struct I2cMockError;
 
-impl fmt::Display for I2cMockError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "I2cMockError!")
-    }
-}
-
-impl error::Error for I2cMockError {
-    fn description(&self) -> &str {
-        "I2cMockError!"
-    }
-
-    fn cause(&self) -> Option<&error::Error> {
-        None
-    }
+/// The mock I2C state.
+///
+/// # Example
+///
+/// ```
+/// // NOTE: `None` is used for the Logger in these examples for convenience,
+/// // in practice using an actual logger is preferred.
+///
+/// extern crate ht16k33;
+/// use ht16k33::i2c_mock::I2cMock;
+/// # fn main() {
+///
+/// // Create an I2cMock.
+/// let i2c_mock = I2cMock::new(None);
+///
+/// # }
+/// ```
+pub struct I2cMock {
+    /// Display RAM state.
+    pub data_values: [u8; ROWS_SIZE],
+    logger: Logger,
 }
 
 impl I2cMock {
@@ -54,27 +49,7 @@ impl I2cMock {
     /// # Notes
     ///
     /// `logger = None`, will log to the `slog-stdlog` drain. This makes the library
-    /// effectively work the same as if it was just using `log` intead of `slog`.
-    ///
-    /// `Into` trick allows passing `Logger` directly, without the `Some` part.
-    /// See http://xion.io/post/code/rust-optional-args.html
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// // NOTE: `None` is used for the Logger in these examples for convenience,
-    /// // in practice using an actual logger is preferred.
-    ///
-    /// extern crate ht16k33;
-    /// use ht16k33::i2c_mock::I2cMock;
-    ///
-    /// # fn main() {
-    ///
-    /// // Create an I2cMock.
-    /// let i2c_mock = I2cMock::new(None);
-    ///
-    /// # }
-    /// ```
+    /// effectively work the same as if it was just using `log` instead of `slog`.
     pub fn new<L>(logger: L) -> Self
     where
         L: Into<Option<Logger>>,
@@ -108,17 +83,13 @@ impl hal::blocking::i2c::WriteRead for I2cMock {
     /// ```
     /// # extern crate embedded_hal;
     /// # extern crate ht16k33;
-    ///
     /// # use embedded_hal::blocking::i2c::WriteRead;
     /// # use ht16k33::i2c_mock::I2cMock;
-    ///
     /// # fn main() {
-    ///
     /// let mut i2c_mock = I2cMock::new(None);
     ///
     /// let mut read_buffer = [0u8; 16];
-    ///
-    /// i2c_mock.write_read(0, &[ht16k33::i2c_mock::DATA_ADDRESS], &mut read_buffer);
+    /// i2c_mock.write_read(0, &[ht16k33::DisplayDataAddress::ROW_0.bits()], &mut read_buffer);
     ///
     /// # }
     /// ```
@@ -132,7 +103,7 @@ impl hal::blocking::i2c::WriteRead for I2cMock {
 
         // The `bytes` have the `data_address` command + index to start reading from,
         // need to clear the command to extract the starting index.
-        let mut data_offset = (bytes[0] ^ DATA_ADDRESS) as usize;
+        let mut data_offset = (bytes[0] ^ DisplayDataAddress::ROW_0.bits()) as usize;
 
         for value in buffer.iter_mut() {
             *value = self.data_values[data_offset];
@@ -160,17 +131,14 @@ impl hal::blocking::i2c::Write for I2cMock {
     /// ```
     /// # extern crate embedded_hal;
     /// # extern crate ht16k33;
-    ///
     /// # use embedded_hal::blocking::i2c::Write;
     /// # use ht16k33::i2c_mock::I2cMock;
-    ///
     /// # fn main() {
-    ///
     /// let mut i2c_mock = I2cMock::new(None);
     ///
     /// // First value is the data address, remaining values are to be written
     /// // starting at the data address which auto-increments and then wraps.
-    /// let write_buffer = [ht16k33::i2c_mock::DATA_ADDRESS, 0u8, 0u8];
+    /// let write_buffer = [ht16k33::DisplayDataAddress::ROW_0.bits(), 0u8, 0u8];
     ///
     /// i2c_mock.write(0, &write_buffer);
     ///
@@ -186,7 +154,7 @@ impl hal::blocking::i2c::Write for I2cMock {
         }
 
         // Other writes have data, store them.
-        let mut data_offset = (bytes[0] ^ DATA_ADDRESS) as usize;
+        let mut data_offset = (bytes[0] ^ DisplayDataAddress::ROW_0.bits()) as usize;
         let data = &bytes[1..];
 
         for value in data.iter() {
@@ -216,7 +184,7 @@ mod tests {
     fn write() {
         let mut i2c_mock = I2cMock::new(None);
 
-        let write_buffer = [super::DATA_ADDRESS, 1u8, 1u8];
+        let write_buffer = [super::DisplayDataAddress::ROW_0.bits(), 1u8, 1u8];
         i2c_mock.write(ADDRESS, &write_buffer).unwrap();
 
         for value in 0..i2c_mock.data_values.len() {
@@ -240,7 +208,7 @@ mod tests {
         let mut i2c_mock = I2cMock::new(None);
 
         let offset = 4u8;
-        let write_buffer = [super::DATA_ADDRESS | offset, 1u8, 1u8];
+        let write_buffer = [super::DisplayDataAddress::ROW_0.bits() | offset, 1u8, 1u8];
         i2c_mock.write(ADDRESS, &write_buffer).unwrap();
 
         for value in 0..i2c_mock.data_values.len() {
@@ -265,7 +233,7 @@ mod tests {
 
         // Match the data values size, +2 to wrap around, +1 for the data command.
         let mut write_buffer = [1u8; super::ROWS_SIZE + 3];
-        write_buffer[0] = super::DATA_ADDRESS;
+        write_buffer[0] = super::DisplayDataAddress::ROW_0.bits();
 
         // These values should wrap and end up at indexes 0 & 1.
         write_buffer[write_buffer.len() - 1] = 2;
@@ -297,7 +265,7 @@ mod tests {
         let mut write_buffer = [1u8; super::ROWS_SIZE + 3];
 
         let offset = 4u8;
-        write_buffer[0] = super::DATA_ADDRESS | offset;
+        write_buffer[0] = super::DisplayDataAddress::ROW_0.bits() | offset;
 
         // These values should wrap and end up at indexes 4 & 5.
         write_buffer[write_buffer.len() - 1] = 2;
@@ -330,7 +298,11 @@ mod tests {
 
         let mut read_buffer = [0u8; super::ROWS_SIZE];
         i2c_mock
-            .write_read(ADDRESS, &[super::DATA_ADDRESS], &mut read_buffer)
+            .write_read(
+                ADDRESS,
+                &[super::DisplayDataAddress::ROW_0.bits()],
+                &mut read_buffer,
+            )
             .unwrap();
 
         for value in 0..read_buffer.len() {
@@ -360,7 +332,11 @@ mod tests {
 
         let offset = 2u8;
         i2c_mock
-            .write_read(ADDRESS, &[super::DATA_ADDRESS | offset], &mut read_buffer)
+            .write_read(
+                ADDRESS,
+                &[super::DisplayDataAddress::ROW_0.bits() | offset],
+                &mut read_buffer,
+            )
             .unwrap();
 
         for value in 0..read_buffer.len() {
@@ -389,7 +365,11 @@ mod tests {
         let mut read_buffer = [0u8; super::ROWS_SIZE + 4];
 
         i2c_mock
-            .write_read(ADDRESS, &[super::DATA_ADDRESS], &mut read_buffer)
+            .write_read(
+                ADDRESS,
+                &[super::DisplayDataAddress::ROW_0.bits()],
+                &mut read_buffer,
+            )
             .unwrap();
 
         for value in 0..read_buffer.len() {
@@ -419,7 +399,11 @@ mod tests {
 
         let offset = 4u8;
         i2c_mock
-            .write_read(ADDRESS, &[super::DATA_ADDRESS | offset], &mut read_buffer)
+            .write_read(
+                ADDRESS,
+                &[super::DisplayDataAddress::ROW_0.bits() | offset],
+                &mut read_buffer,
+            )
             .unwrap();
 
         for value in 0..read_buffer.len() {
