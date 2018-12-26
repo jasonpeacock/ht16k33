@@ -1,134 +1,181 @@
 //! # HT16K33
 //!
-//! A driver for the [Holtek HT16K33](http://www.holtek.com/productdetail/-/vg/HT16K33) memory mapping and multi-function LED controller driver, as used by the [Adafruit Bi-Color (Red/Green) 24-Bar Bargraph w/I2C Backpack Kit](https://www.adafruit.com/product/1721).
+//! A driver for the [Holtek HT16K33](http://www.holtek.com/productdetail/-/vg/HT16K33).
 //!
-//! The implementation was inspired by [Adafruit's HT16K33.py Python
-//! implementation](https://github.com/adafruit/Adafruit_Python_LED_Backpack/blob/master/Adafruit_LED_Backpack/HT16K33.py).
+//! The set_*/read_*/write_* methods interact directly with the device. All other methods operate
+//! on local state only.
+extern crate embedded_hal as hal;
 
-extern crate i2cdev;
-extern crate num_integer;
-
+/// Re-export slog
+///
+/// Users of this library can, but don't have to, use slog to build their own loggers.
 #[macro_use]
-extern crate slog;
+pub extern crate slog;
 extern crate slog_stdlog;
-
-use std::error;
-use std::fmt;
-
-use i2cdev::core::I2CDevice;
-
-use num_integer::Integer;
-
-use slog::Drain;
-use slog::Logger;
-use slog_stdlog::StdLog;
 
 pub mod i2c_mock;
 
-pub enum HT16K33Error<D>
-where
-    D: I2CDevice,
-{
-    /// Error from the `I2C` interface.
-    Device(D::Error),
-    /// Error from `HT16K33`.
-    Error,
+use hal::blocking::i2c::{Write, WriteRead};
+
+use slog::Drain;
+
+const ROWS_SIZE: usize = 16;
+const COMMONS_SIZE: usize = 8;
+
+const DATA_ADDRESS: u8 = 0b0000_0000;
+const DIMMING_SET: u8 = 0b1110_0000;
+const DISPLAY_SET: u8 = 0b1000_0000;
+const SYSTEM_SET: u8 = 0b0010_0000;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Oscillator {
+    /// Normal operation mode.
+    On,
+    /// Standby mode. Power-on default.
+    Off,
 }
 
-impl<D> fmt::Debug for HT16K33Error<D>
-where
-    D: I2CDevice,
-{
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "HT16K33Error: {:?}", self)
-    }
-}
-
-impl<D> fmt::Display for HT16K33Error<D>
-where
-    D: I2CDevice,
-{
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Oscillator {
+    fn value(&self) -> u8 {
         match *self {
-            HT16K33Error::Device(ref err) => write!(f, "I2CDevice Error: {}", err),
-            HT16K33Error::Error => write!(f, "HT16K33 Error"),
+            Oscillator::On => 0b0000_0001,
+            Oscillator::Off => 0b0000_0000,
         }
     }
 }
 
-impl<D> error::Error for HT16K33Error<D>
-where
-    D: I2CDevice,
-{
-    fn description(&self) -> &str {
-        match *self {
-            HT16K33Error::Device(_) => "I2CDevice Error",
-            HT16K33Error::Error => "HT16K33 Error",
-        }
-    }
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Display {
+    On,
+    /// Power-on default.
+    Off,
+}
 
-    fn cause(&self) -> Option<&error::Error> {
+impl Display {
+    fn value(&self) -> u8 {
         match *self {
-            HT16K33Error::Device(ref err) => Some(err),
-            HT16K33Error::Error => None,
+            Display::On => 0b0000_0001,
+            Display::Off => 0b0000_0000,
         }
     }
 }
 
-pub struct HT16K33<D>
-where
-    D: I2CDevice,
-{
-    buffer: [u8; 16],
-    i2c_device: D,
-    is_ready: bool,
-    logger: Logger,
-    steps: u8,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Blink {
+    /// Power-on default.
+    Off,
+    HalfHz,
+    OneHz,
+    TwoHz,
 }
 
-// System initialization values.
-const SYSTEM_SETUP: u8 = 0x20;
-const OSCILLATOR: u8 = 0x01;
+impl Blink {
+    fn value(&self) -> u8 {
+        match *self {
+            Blink::Off => 0b0000_0000,
+            Blink::HalfHz => 0b0000_0110,
+            Blink::OneHz => 0b0000_0100,
+            Blink::TwoHz => 0b0000_0010,
+        }
+    }
+}
 
-// Display brightness.
-const BRIGHTNESS_CMD: u8 = 0xE0;
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Dimming {
+    Brightness(u8),
+    MinBrightness,
+    /// Power-on default.
+    MaxBrightness,
+}
 
-// Blink values.
-const BLINK_CMD: u8 = 0x80;
-const BLINK_DISPLAYON: u8 = 0x01;
+impl Dimming {
+    // Can we implement From<u8> instead?
+    // https://ricardomartins.cc/2016/08/03/convenient_and_idiomatic_conversions_in_rust
+    pub fn from_u8(value: u8) -> Result<Self, Error> {
+        if value > Dimming::MaxBrightness.value() {
+            return Err(Error::OutOfRange(format!(
+                "Dimming value [{}] is greater than max brightness [{}]",
+                value,
+                Dimming::MaxBrightness.value()
+            )));
+        }
 
-// TODO use an enum for these values.
-/// Disable blinking of the display.
-pub const BLINK_OFF: u8 = 0x00;
-/// Blink the display at 2Hz.
-pub const BLINK_2HZ: u8 = 0x02;
-/// Blink the display at 1Hz.
-pub const BLINK_1HZ: u8 = 0x04;
-/// Blink the display at 0.5Hz.
-pub const BLINK_HALFHZ: u8 = 0x06;
+        Ok(Dimming::Brightness(value))
+    }
 
-// A bitmask value where the first bit is Green, and the second bit is
-// Red. If both bits are set then the color is Yellow (Red + Green light).
-// TODO use an enum for these values.
-/// Turn off both the Red & Green LEDs.
-pub const COLOR_OFF: u8 = 0;
-/// Turn on only the Green LED.
-pub const COLOR_GREEN: u8 = 1;
-/// Turn on only the Red LED.
-pub const COLOR_RED: u8 = 2;
-/// Turn on both the Red  & Green LEDs.
-pub const COLOR_YELLOW: u8 = 3;
+    pub fn value(&self) -> u8 {
+        match *self {
+            Dimming::Brightness(value) => value,
+            Dimming::MinBrightness => 0b0000_0000,
+            Dimming::MaxBrightness => 0b0000_1111,
+        }
+    }
+}
 
-impl<D> HT16K33<D>
+#[derive(Debug, PartialEq)]
+pub enum Error {
+    OutOfRange(String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LedLocation {
+    row: u8,
+    common: u8,
+}
+
+impl LedLocation {
+    pub fn new(row: u8, common: u8) -> Result<Self, Error> {
+        if row >= ROWS_SIZE as u8 {
+            return Err(Error::OutOfRange(format!(
+                "Row value [{}] is greater than rows size [{}]",
+                row, ROWS_SIZE
+            )));
+        }
+
+        if common >= COMMONS_SIZE as u8 {
+            return Err(Error::OutOfRange(format!(
+                "Common value [{}] is greater than commons size [{}]",
+                common, COMMONS_SIZE
+            )));
+        }
+
+        Ok(LedLocation {
+            row: row,
+            common: common,
+        })
+    }
+}
+
+pub struct HT16K33<I2C> {
+    i2c: I2C,
+
+    // Device I2C address.
+    address: u8,
+
+    // Represents the desired values of the device, may not match
+    // the current values if it has not been written recently.
+    buffer: [u8; ROWS_SIZE],
+
+    // The following values are write-only registers and cannot
+    // be queried from the device. We need to track their state
+    // here and synchronize them with the device.
+    oscillator_state: Oscillator,
+    display_state: Display,
+    blink_state: Blink,
+    dimming_state: Dimming,
+
+    logger: slog::Logger,
+}
+
+impl<I2C, E> HT16K33<I2C>
 where
-    D: I2CDevice,
+    I2C: Write<Error = E> + WriteRead<Error = E>,
 {
     /// Create an HT16K33 driver.
     ///
     /// # Arguments
     ///
-    /// * `i2c_device` - The I2C device to communicate with the HT16K33 driver.
-    /// * `steps` - The resolution of the display.
+    /// * `i2c` - The I2C device to communicate with the HT16K33 driver.
     /// * `logger` - A logging instance.
     ///
     /// # Notes
@@ -145,194 +192,425 @@ where
     /// // NOTE: `None` is used for the Logger in these examples for convenience,
     /// // in practice using an actual logger is preferred.
     ///
-    /// // Create a mock I2C device.
-    /// use ht16k33::i2c_mock::MockI2CDevice;
-    /// let i2c_device = MockI2CDevice::new(None);
-    ///
-    /// // Create a connected display with a resolution of 24 steps.
+    /// extern crate ht16k33;
+    /// use ht16k33::i2c_mock::I2cMock;
     /// use ht16k33::HT16K33;
-    /// let mut ht16k33 = HT16K33::new(i2c_device, 24, None).unwrap();
+    ///
+    /// # fn main() {
+    ///
+    /// // Create an I2C device.
+    /// let mut i2c = I2cMock::new(None);
+    ///
+    /// // The I2C device address.
+    /// let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address, None).unwrap();
+    ///
+    /// # }
     /// ```
-    pub fn new<L>(i2c_device: D, steps: u8, logger: L) -> Result<HT16K33<D>, HT16K33Error<D>>
+    pub fn new<L>(i2c: I2C, address: u8, logger: L) -> Result<Self, E>
     where
-        L: Into<Option<Logger>>,
+        L: Into<Option<slog::Logger>>,
     {
-        let logger = logger.into().unwrap_or(Logger::root(StdLog.fuse(), o!()));
+        let logger = logger
+            .into()
+            .unwrap_or(slog::Logger::root(slog_stdlog::StdLog.fuse(), o!()));
 
-        debug!(logger, "Constructing HT16K33 driver"; "steps" => steps);
+        trace!(logger, "Constructing HT16K33");
 
-        let ht16k33 = HT16K33 {
-            buffer: [0; 16],
-            i2c_device: i2c_device,
-            is_ready: false,
+        // Configure the initial values to match the power-on defaults.
+        Ok(HT16K33 {
+            address: address,
+            i2c: i2c,
+            buffer: [0; ROWS_SIZE],
+            oscillator_state: Oscillator::Off,
+            display_state: Display::Off,
+            blink_state: Blink::Off,
+            dimming_state: Dimming::MaxBrightness,
             logger: logger,
-            steps: steps,
-        };
-
-        Ok(ht16k33)
+        })
     }
 
-    /// Initialize the HT16K33 chip.
-    ///
-    /// Sets the initial state:
-    ///
-    /// * System setup.
-    /// * Enable clock oscillator.
-    /// * Disable blinking.
-    /// * Set maximum brightness.
+    /// Initialize the HT16K33.
     ///
     /// # Examples
     ///
     /// ```
+    /// # extern crate ht16k33;
+    /// # use ht16k33::i2c_mock::I2cMock;
     /// # use ht16k33::HT16K33;
-    /// # use ht16k33::i2c_mock::MockI2CDevice;
-    /// #
-    /// # let i2c_device = MockI2CDevice::new(None);
-    /// #
-    /// // Create an HT16K33 driver.
-    /// let mut ht16k33 = HT16K33::new(i2c_device, 24, None).unwrap();
+    /// # fn main() {
     ///
-    /// // Initialize the HT16K33.
-    /// ht16k33.initialize();
+    /// # let mut i2c = I2cMock::new(None);
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address, None).unwrap();
+    /// ht16k33.initialize().unwrap();
+    ///
+    /// # }
     /// ```
-    pub fn initialize(&mut self) -> Result<(), HT16K33Error<D>> {
-        debug!(self.logger, "Initializing HT16K33");
+    pub fn initialize(&mut self) -> Result<(), E> {
+        // Enable the oscillator so we can use the device.
+        self.set_oscillator(Oscillator::On)?;
 
-        debug!(
-            self.logger,
-            "Setting up the system & enabling the oscillator"
+        // Set all values to match their defaults.
+        self.set_display(Display::Off, Blink::Off)?;
+        self.set_dimming(Dimming::MaxBrightness)?;
+
+        // And clear the display.
+        self.clear_display_buffer();
+        self.write_display_buffer()?;
+
+        Ok(())
+    }
+
+    /// Return the given I2C device, making this device unusable.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate ht16k33;
+    /// # use ht16k33::i2c_mock::I2cMock;
+    /// # use ht16k33::HT16K33;
+    /// # fn main() {
+    ///
+    /// # let mut i2c = I2cMock::new(None);
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address, None).unwrap();
+    /// i2c = ht16k33.destroy();
+    ///
+    /// # }
+    /// ```
+    pub fn destroy(self) -> I2C {
+        // TODO Improve the naming? And somehow mark the state as destroyed so that
+        // all other I2C accesses fail nicely? Should we continue to allow non-I2C access?
+        self.i2c
+    }
+
+    /// Return the current display buffer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate ht16k33;
+    /// # use ht16k33::i2c_mock::I2cMock;
+    /// # use ht16k33::HT16K33;
+    /// # fn main() {
+    ///
+    /// # let mut i2c = I2cMock::new(None);
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address, None).unwrap();
+    /// let buffer = ht16k33.get_display_buffer();
+    ///
+    /// # }
+    /// ```
+    pub fn get_display_buffer(&self) -> &[u8; ROWS_SIZE] {
+        trace!(self.logger, "get_display_buffer");
+
+        &self.buffer
+    }
+
+    /// Return the current oscillator state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate ht16k33;
+    /// # use ht16k33::i2c_mock::I2cMock;
+    /// # use ht16k33::HT16K33;
+    /// # fn main() {
+    ///
+    /// # let mut i2c = I2cMock::new(None);
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address, None).unwrap();
+    /// let oscillator = ht16k33.get_oscillator();
+    ///
+    /// # }
+    /// ```
+    pub fn get_oscillator(&self) -> &Oscillator {
+        trace!(self.logger, "get_oscillator");
+
+        &self.oscillator_state
+    }
+
+    /// Return the current display & blink state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate ht16k33;
+    /// # use ht16k33::i2c_mock::I2cMock;
+    /// # use ht16k33::HT16K33;
+    /// # fn main() {
+    ///
+    /// # let mut i2c = I2cMock::new(None);
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address, None).unwrap();
+    /// let (display, blink) = ht16k33.get_display();
+    ///
+    /// # }
+    /// ```
+    pub fn get_display(&self) -> (&Display, &Blink) {
+        trace!(self.logger, "get_display");
+
+        (&self.display_state, &self.blink_state)
+    }
+
+    /// Return the current dimming state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate ht16k33;
+    /// # use ht16k33::i2c_mock::I2cMock;
+    /// # use ht16k33::HT16K33;
+    /// # fn main() {
+    ///
+    /// # let mut i2c = I2cMock::new(None);
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address, None).unwrap();
+    /// let dimming = ht16k33.get_dimming();
+    ///
+    /// # }
+    /// ```
+    pub fn get_dimming(&self) -> &Dimming {
+        trace!(self.logger, "get_dimming");
+
+        &self.dimming_state
+    }
+
+    /// Enable/disable an LED address in the display buffer.
+    ///
+    /// The buffer must be written using [write_display_buffer()](struct.HT16K33.html#method.write_display_buffer)
+    /// for the change to be displayed.
+    ///
+    /// # Arguments
+    ///
+    /// * `location` - The LED location to update.
+    /// * `enabled` - Set the LED on (true) or off (false).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate ht16k33;
+    /// # use ht16k33::i2c_mock::I2cMock;
+    /// # use ht16k33::HT16K33;
+    /// use ht16k33::LedLocation;
+    /// # fn main() {
+    ///
+    /// # let mut i2c = I2cMock::new(None);
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address, None).unwrap();
+    ///
+    /// let led_location = LedLocation::new(0, 0).unwrap();
+    /// ht16k33.update_display_buffer(led_location, true).unwrap();
+    ///
+    /// # }
+    /// ```
+    pub fn update_display_buffer(&mut self, location: LedLocation, enabled: bool) -> Result<(), E> {
+        // TODO Validate `address` parameter.
+        trace!(self.logger, "update_display_buffer"; "location" => format!("{:?}", location), "enabled" => enabled);
+
+        match enabled {
+            // Turn on the specified LED (set bit to one).
+            true => self.buffer[location.row as usize] |= 1 << location.common,
+            // Turn off the specified LED (set bit to zero).
+            false => self.buffer[location.row as usize] &= !(1 << location.common),
+        }
+
+        Ok(())
+    }
+
+    /// Clear contents of the display buffer.
+    ///
+    /// The buffer must be written using [write_display_buffer()](struct.HT16K33.html#method.write_display_buffer)
+    /// for the change to be displayed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate ht16k33;
+    /// # use ht16k33::i2c_mock::I2cMock;
+    /// # use ht16k33::HT16K33;
+    /// # fn main() {
+    ///
+    /// # let mut i2c = I2cMock::new(None);
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address, None).unwrap();
+    ///
+    /// ht16k33.clear_display_buffer();
+    ///
+    /// # }
+    /// ```
+    pub fn clear_display_buffer(&mut self) {
+        trace!(self.logger, "clear_display_buffer");
+
+        // TODO is there any advantage to iteration vs just assigning
+        // an empty [0; ROWS_SIZE] array?
+        for row in self.buffer.iter_mut() {
+            *row = 0;
+        }
+    }
+
+    /// Control the oscillator.
+    ///
+    /// # Arguments
+    ///
+    /// * `oscillator` - Set the oscillator On/Off.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate ht16k33;
+    /// # use ht16k33::i2c_mock::I2cMock;
+    /// # use ht16k33::HT16K33;
+    /// use ht16k33::Oscillator;
+    /// # fn main() {
+    ///
+    /// # let mut i2c = I2cMock::new(None);
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address, None).unwrap();
+    ///
+    /// ht16k33.set_oscillator(Oscillator::On).unwrap();
+    ///
+    /// # }
+    /// ```
+    pub fn set_oscillator(&mut self, oscillator: Oscillator) -> Result<(), E> {
+        trace!(self.logger, "set_oscillator"; "oscillator" => format!("{:?}", oscillator));
+
+        self.oscillator_state = oscillator;
+
+        self.i2c
+            .write(self.address, &[SYSTEM_SET | self.oscillator_state.value()])?;
+
+        Ok(())
+    }
+
+    /// Control the display.
+    ///
+    /// # Arguments
+    ///
+    /// * `display` - Set the display On/Off.
+    /// * `blink` - Set the blink On/Off/etc.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate ht16k33;
+    /// # use ht16k33::i2c_mock::I2cMock;
+    /// # use ht16k33::HT16K33;
+    /// use ht16k33::Display;
+    /// use ht16k33::Blink;
+    /// # fn main() {
+    ///
+    /// # let mut i2c = I2cMock::new(None);
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address, None).unwrap();
+    ///
+    /// ht16k33.set_display(Display::On, Blink::HalfHz).unwrap();
+    ///
+    /// # }
+    /// ```
+    pub fn set_display(&mut self, display: Display, blink: Blink) -> Result<(), E> {
+        trace!(self.logger, "set_display";
+        "display" => format!("{:?}", display),
+        "blink" => format!("{:?}", blink),
         );
-        self.i2c_device
-            .smbus_write_block_data(SYSTEM_SETUP | OSCILLATOR, &[0; 0])
-            .map_err(HT16K33Error::Device)?;
 
-        // All initializations finished, ready to use.
-        self.is_ready = true;
+        self.display_state = display;
+        self.blink_state = blink;
 
-        Ok(())
-    }
-
-    /// Get the resolution (number of steps) of the display.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use ht16k33::HT16K33;
-    /// # use ht16k33::i2c_mock::MockI2CDevice;
-    /// #
-    /// # let i2c_device = MockI2CDevice::new(None);
-    /// #
-    /// // Create an HT16K33 driver.
-    /// let mut ht16k33 = HT16K33::new(i2c_device, 24, None).unwrap();
-    /// ht16k33.initialize();
-    ///
-    /// let steps = ht16k33.get_resolution();
-    /// ```
-    pub fn get_resolution(&mut self) -> u8 {
-        self.steps
-    }
-
-    /// Check if the HT16K33 driver is ready to be used.
-    ///
-    /// The HT16K33 driver must be initialized to be ready to be used.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use ht16k33::HT16K33;
-    /// # use ht16k33::i2c_mock::MockI2CDevice;
-    /// #
-    /// # let i2c_device = MockI2CDevice::new(None);
-    /// #
-    /// // Create an HT16K33 driver.
-    /// let mut ht16k33 = HT16K33::new(i2c_device, 24, None).unwrap();
-    ///
-    /// // Not ready to use yet.
-    /// assert_eq!(false, ht16k33.is_ready());
-    ///
-    /// // Initialize the HT16K33.
-    /// ht16k33.initialize();
-    ///
-    /// // Ready to use.
-    /// assert_eq!(true, ht16k33.is_ready());
-    /// ```
-    pub fn is_ready(&mut self) -> bool {
-        self.is_ready
-    }
-
-    /// Enable/disabling blinking the display.
-    ///
-    /// # Arguments
-    ///
-    /// * `frequency` - A valid frequency value.
-    ///
-    /// # Notes
-    ///
-    /// The frequency must be one of the following values:
-    ///
-    /// * [BLINK_OFF](constant.BLINK_OFF.html)
-    /// * [BLINK_HALFHZ](constant.BLINK_HALFHZ.html)
-    /// * [BLINK_1HZ](constant.BLINK_1HZ.html)
-    /// * [BLINK_2HZ](constant.BLINK_2Hz.html)
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use ht16k33::HT16K33;
-    /// # use ht16k33::i2c_mock::MockI2CDevice;
-    /// #
-    /// # let i2c_device = MockI2CDevice::new(None);
-    /// #
-    /// // Create an HT16K33 driver.
-    /// let mut ht16k33 = HT16K33::new(i2c_device, 24, None).unwrap();
-    /// ht16k33.initialize();
-    ///
-    /// // Blink the display quickly.
-    /// ht16k33.set_blink(ht16k33::BLINK_2HZ);
-    /// ```
-    pub fn set_blink(&mut self, frequency: u8) -> Result<(), HT16K33Error<D>> {
-        if !self.is_ready() {
-            return Err(HT16K33Error::Error);
-        }
-
-        // TODO Validate `frequency` parameter.
-        self.i2c_device
-            .smbus_write_block_data(BLINK_CMD | BLINK_DISPLAYON | frequency, &[0; 0])
-            .map_err(HT16K33Error::Device)?;
+        self.i2c.write(
+            self.address,
+            &[DISPLAY_SET | self.display_state.value() | self.blink_state.value()],
+        )?;
 
         Ok(())
     }
 
-    /// Set the display brightness.
+    /// Control the display dimming.
     ///
     /// # Arguments
     ///
-    /// * `brightness` - A value from `0` (lowest) to `15` (highest).
+    /// * `dimming` - A value from `0` (lowest) to `15` (highest).
     ///
     /// # Examples
     ///
     /// ```
+    /// # extern crate ht16k33;
+    /// # use ht16k33::i2c_mock::I2cMock;
     /// # use ht16k33::HT16K33;
-    /// # use ht16k33::i2c_mock::MockI2CDevice;
-    /// #
-    /// # let i2c_device = MockI2CDevice::new(None);
-    /// #
-    /// // Create an HT16K33 driver.
-    /// let mut ht16k33 = HT16K33::new(i2c_device, 24, None).unwrap();
-    /// ht16k33.initialize();
+    /// use ht16k33::Dimming;
+    /// # fn main() {
     ///
-    /// // Set the display to maximum brightness.
-    /// ht16k33.set_brightness(15u8);
+    /// # let mut i2c = I2cMock::new(None);
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address, None).unwrap();
+    ///
+    /// ht16k33.set_dimming(Dimming::from_u8(4).unwrap()).unwrap();
+    ///
+    /// # }
     /// ```
-    pub fn set_brightness(&mut self, brightness: u8) -> Result<(), HT16K33Error<D>> {
-        if !self.is_ready() {
-            return Err(HT16K33Error::Error);
-        }
+    pub fn set_dimming(&mut self, dimming: Dimming) -> Result<(), E> {
+        trace!(self.logger, "set_dimming"; "dimming" => format!("{:?}", dimming));
 
-        // TODO Validate `brightness` parameter.
-        self.i2c_device
-            .smbus_write_block_data(BRIGHTNESS_CMD | brightness, &[0; 0])
-            .map_err(HT16K33Error::Device)?;
+        self.dimming_state = dimming;
+
+        self.i2c
+            .write(self.address, &[DIMMING_SET | self.dimming_state.value()])?;
+
+        Ok(())
+    }
+
+    /// Control an LED.
+    ///
+    /// # Arguments
+    ///
+    /// * `location` - The LED location to update.
+    /// * `enabled` - Set the LED on (true) or off (false).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate ht16k33;
+    /// # use ht16k33::i2c_mock::I2cMock;
+    /// # use ht16k33::HT16K33;
+    /// use ht16k33::LedLocation;
+    /// # fn main() {
+    ///
+    /// # let mut i2c = I2cMock::new(None);
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address, None).unwrap();
+    ///
+    /// let led_location = LedLocation::new(0, 0).unwrap();
+    /// ht16k33.set_led(led_location, true).unwrap();
+    ///
+    /// # }
+    /// ```
+    pub fn set_led(&mut self, location: LedLocation, enabled: bool) -> Result<(), E> {
+        // TODO Validate `address` parameter.
+        trace!(self.logger, "set_led"; "location" => format!("{:?}", location), "enabled" => enabled);
+
+        self.update_display_buffer(location, enabled)?;
+
+        self.i2c.write(
+            self.address,
+            &[
+                DATA_ADDRESS | location.row,
+                self.buffer[location.row as usize],
+            ],
+        )?;
 
         Ok(())
     }
@@ -342,29 +620,31 @@ where
     /// # Examples
     ///
     /// ```
+    /// # extern crate ht16k33;
+    /// # use ht16k33::i2c_mock::I2cMock;
     /// # use ht16k33::HT16K33;
-    /// # use ht16k33::i2c_mock::MockI2CDevice;
-    /// #
-    /// # let i2c_device = MockI2CDevice::new(None);
-    /// #
-    /// // Create an HT16K33 driver.
-    /// let mut ht16k33 = HT16K33::new(i2c_device, 24, None).unwrap();
-    /// ht16k33.initialize();
+    /// # fn main() {
     ///
-    /// // Write the current buffer contents to the HT16K33 driver.
-    /// ht16k33.write_display();
+    /// # let mut i2c = I2cMock::new(None);
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address, None).unwrap();
+    ///
+    /// ht16k33.write_display_buffer().unwrap();
+    ///
+    /// # }
     /// ```
-    pub fn write_display(&mut self) -> Result<(), HT16K33Error<D>> {
-        // TODO rename to be "update_display" or "write_buffer"
-        if !self.is_ready() {
-            return Err(HT16K33Error::Error);
-        }
+    pub fn write_display_buffer(&mut self) -> Result<(), E> {
+        trace!(self.logger, "write_display_buffer"; "buffer" => format!("{:?}", self.buffer));
+
+        let mut write_buffer = [0u8; ROWS_SIZE + 1];
+        write_buffer[0] = DATA_ADDRESS;
 
         for value in 0..self.buffer.len() {
-            self.i2c_device
-                .smbus_write_byte_data(value as u8, self.buffer[value])
-                .map_err(HT16K33Error::Device)?;
+            write_buffer[value as usize + 1] = self.buffer[value as usize];
         }
+
+        self.i2c.write(self.address, &write_buffer)?;
 
         Ok(())
     }
@@ -374,175 +654,308 @@ where
     /// # Examples
     ///
     /// ```
+    /// # extern crate ht16k33;
+    /// # use ht16k33::i2c_mock::I2cMock;
     /// # use ht16k33::HT16K33;
-    /// # use ht16k33::i2c_mock::MockI2CDevice;
-    /// #
-    /// # let i2c_device = MockI2CDevice::new(None);
-    /// #
-    /// // Create an HT16K33 driver.
-    /// let mut ht16k33 = HT16K33::new(i2c_device, 24, None).unwrap();
-    /// ht16k33.initialize();
+    /// # fn main() {
     ///
-    /// // Write the current buffer contents to the HT16K33 driver.
-    /// let values = ht16k33.read_display();
+    /// # let mut i2c = I2cMock::new(None);
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address, None).unwrap();
+    ///
+    /// ht16k33.read_display_buffer().unwrap();
+    ///
+    /// # }
     /// ```
-    pub fn read_display(&mut self) -> Result<(), HT16K33Error<D>> {
-        if !self.is_ready() {
-            return Err(HT16K33Error::Error);
-        }
+    pub fn read_display_buffer(&mut self) -> Result<(), E> {
+        trace!(self.logger, "read_display_buffer"; "buffer" => format!("{:?}", self.buffer));
 
-        for value in 0..self.buffer.len() {
-            self.i2c_device
-                .smbus_write_byte_data(value as u8, self.buffer[value])
-                .map_err(HT16K33Error::Device)?;
-        }
+        self.i2c
+            .write_read(self.address, &[DATA_ADDRESS], &mut self.buffer)?;
 
         Ok(())
     }
+}
 
-    /// Enable/disable an LED in the display buffer.
-    ///
-    /// The buffer must be written using [write_display()](struct.HT16K33.html#method.write_display)
-    /// for the change to be displayed.
-    ///
-    /// # Arguments
-    ///
-    /// * `led` - An LED address from `0` to `127`.
-    /// * `enabled` - Turn the LED on (true) or off (false).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use ht16k33::HT16K33;
-    /// # use ht16k33::i2c_mock::MockI2CDevice;
-    /// #
-    /// # let i2c_device = MockI2CDevice::new(None);
-    /// #
-    /// // Create an HT16K33 driver.
-    /// let mut ht16k33 = HT16K33::new(i2c_device, 24, None).unwrap();
-    /// ht16k33.initialize();
-    ///
-    /// // Turn on the LED at address 0.
-    /// ht16k33.set_led(0u8, true);
-    ///
-    /// // Write the current buffer contents to the HT16K33 driver.
-    /// ht16k33.write_display();
-    /// ```
-    pub fn set_led(&mut self, led: u8, enabled: bool) -> Result<(), HT16K33Error<D>> {
-        if !self.is_ready() {
-            return Err(HT16K33Error::Error);
-        }
+#[cfg(test)]
+mod tests {
+    extern crate embedded_hal_mock as hal;
 
-        // TODO Validate `led` parameter.
+    use self::hal::i2c::{Mock as I2cMock, Transaction as I2cTransaction};
+    use super::*;
 
-        // Calculate position in byte buffer and get offset of desired LED.
-        let (pos, offset) = led.div_mod_floor(&8);
+    const ADDRESS: u8 = 0;
 
-        if enabled {
-            // Turn on the specified LED (set bit to one).
-            self.buffer[pos as usize] |= 1 << offset;
-        } else {
-            // Turn off the specified LED (set bit to zero).
-            self.buffer[pos as usize] &= !(1 << offset);
-        }
+    #[test]
+    fn new() {
+        let expectations = [];
 
-        Ok(())
+        let mut i2c = I2cMock::new(&expectations);
+        let ht16k33 = HT16K33::new(i2c, ADDRESS, None).unwrap();
+
+        i2c = ht16k33.destroy();
+        i2c.done();
     }
 
-    /// Clear contents of display buffer.
-    ///
-    /// The buffer must be written using [write_display()](struct.HT16K33.html#method.write_display)
-    /// for the change to be displayed.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use ht16k33::HT16K33;
-    /// # use ht16k33::i2c_mock::MockI2CDevice;
-    /// #
-    /// # let i2c_device = MockI2CDevice::new(None);
-    /// #
-    /// // Create an HT16K33 driver.
-    /// let mut ht16k33 = HT16K33::new(i2c_device, 24, None).unwrap();
-    /// ht16k33.initialize();
-    ///
-    /// // Clear the display buffer.
-    /// ht16k33.clear();
-    ///
-    /// // Write the current buffer contents to the HT16K33 driver.
-    /// ht16k33.write_display();
-    /// ```
-    pub fn clear(&mut self) -> Result<(), HT16K33Error<D>> {
-        if !self.is_ready() {
-            return Err(HT16K33Error::Error);
-        }
+    #[test]
+    fn initialize() {
+        let mut write_buffer = vec![super::DATA_ADDRESS];
+        write_buffer.extend([0; super::ROWS_SIZE].iter().cloned());
 
-        self.buffer = [0; 16];
+        let expectations = [
+            I2cTransaction::write(
+                ADDRESS,
+                vec![super::SYSTEM_SET | super::Oscillator::On.value()],
+            ),
+            I2cTransaction::write(
+                ADDRESS,
+                vec![super::DISPLAY_SET | super::Display::Off.value() | super::Blink::Off.value()],
+            ),
+            I2cTransaction::write(
+                ADDRESS,
+                vec![super::DIMMING_SET | Dimming::MaxBrightness.value()],
+            ),
+            I2cTransaction::write(ADDRESS, write_buffer),
+        ];
 
-        Ok(())
+        let mut i2c = I2cMock::new(&expectations);
+        let mut ht16k33 = HT16K33::new(i2c, ADDRESS, None).unwrap();
+
+        ht16k33.initialize().unwrap();
+
+        i2c = ht16k33.destroy();
+        i2c.done();
     }
 
-    /// Set bar to desired color. Bar should be a value of 0 to 23, and color should be
-    /// OFF, GREEN, RED, or YELLOW.
-    ///
-    /// The buffer must be written using [write_display()](struct.HT16K33.html#method.write_display)
-    /// for the change to be displayed.
-    ///
-    /// # Arguments
-    ///
-    /// * `bar` - A value from `0` to `23`.
-    /// * `color` - A valid color value.
-    ///
-    /// # Notes
-    ///
-    /// The color must be one of the following values:
-    ///
-    /// * [COLOR_OFF](constant.COLOR_OFF.html)
-    /// * [COLOR_GREEN](constant.COLOR_GREEN.html)
-    /// * [COLOR_RED](constant.COLOR_RED.html)
-    /// * [COLOR_YELLOW](constant.COLOR_YELLOW.html)
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use ht16k33::HT16K33;
-    /// # use ht16k33::i2c_mock::MockI2CDevice;
-    /// #
-    /// # let i2c_device = MockI2CDevice::new(None);
-    /// #
-    /// // Create an HT16K33 driver.
-    /// let mut ht16k33 = HT16K33::new(i2c_device, 24, None).unwrap();
-    /// ht16k33.initialize();
-    ///
-    /// // Set the first bar to be Yellow.
-    /// ht16k33.set_bar(0u8, ht16k33::COLOR_YELLOW);
-    ///
-    /// // Write the current buffer contents to the HT16K33 driver.
-    /// ht16k33.write_display();
-    /// ```
-    pub fn set_bar(&mut self, bar: u8, color: u8) -> Result<(), HT16K33Error<D>> {
-        // TODO use Option to return only errors for these void functions
-        if !self.is_ready() {
-            return Err(HT16K33Error::Error);
+    #[test]
+    fn get_display_buffer() {
+        let expectations = [];
+
+        let mut i2c = I2cMock::new(&expectations);
+        let ht16k33 = HT16K33::new(i2c, ADDRESS, None).unwrap();
+
+        let &buffer = ht16k33.get_display_buffer();
+
+        // Ensure it's the expected size.
+        assert_eq!(buffer.len(), ROWS_SIZE);
+
+        for row in buffer.iter() {
+            // And because we just initialized this buffer, it should be all zeros.
+            assert_eq!(*row, 0u8);
         }
 
-        // TODO Validate `bar` parameter.
-        // TODO Validate `color` parameter.
-        // Compute cathode and anode values.
-        let (c, mut a) = (if bar < 12 { bar } else { bar - 12 }).div_mod_floor(&4);
-        if bar >= 12 {
-            a += 4;
+        i2c = ht16k33.destroy();
+        i2c.done();
+    }
+
+    #[test]
+    fn get_oscillator() {
+        let expectations = [];
+
+        let mut i2c = I2cMock::new(&expectations);
+        let ht16k33 = HT16K33::new(i2c, ADDRESS, None).unwrap();
+
+        let &oscillator = ht16k33.get_oscillator();
+
+        assert_eq!(oscillator, Oscillator::Off);
+
+        i2c = ht16k33.destroy();
+        i2c.done();
+    }
+
+    #[test]
+    fn get_display() {
+        let expectations = [];
+
+        let mut i2c = I2cMock::new(&expectations);
+        let ht16k33 = HT16K33::new(i2c, ADDRESS, None).unwrap();
+
+        let (&display, &blink) = ht16k33.get_display();
+
+        assert_eq!(display, Display::Off);
+        assert_eq!(blink, Blink::Off);
+
+        i2c = ht16k33.destroy();
+        i2c.done();
+    }
+
+    #[test]
+    fn get_dimming() {
+        let expectations = [];
+
+        let mut i2c = I2cMock::new(&expectations);
+        let ht16k33 = HT16K33::new(i2c, ADDRESS, None).unwrap();
+
+        let &dimming = ht16k33.get_dimming();
+
+        assert_eq!(dimming, Dimming::MaxBrightness);
+
+        i2c = ht16k33.destroy();
+        i2c.done();
+    }
+
+    #[test]
+    fn update_display_buffer() {
+        let expectations = [];
+
+        let mut i2c = I2cMock::new(&expectations);
+        let mut ht16k33 = HT16K33::new(i2c, ADDRESS, None).unwrap();
+
+        let first_led = LedLocation::new(1, 4).unwrap();
+        let second_led = LedLocation::new(1, 5).unwrap();
+
+        // Turn on the LED.
+        ht16k33.update_display_buffer(first_led, true).unwrap();
+        assert_eq!(ht16k33.get_display_buffer()[1], 0b0001_0000);
+
+        // Turn on another LED.
+        ht16k33.update_display_buffer(second_led, true).unwrap();
+        assert_eq!(ht16k33.get_display_buffer()[1], 0b0011_0000);
+
+        // Turn off the first LED.
+        ht16k33.update_display_buffer(first_led, false).unwrap();
+        assert_eq!(ht16k33.get_display_buffer()[1], 0b0010_0000);
+
+        i2c = ht16k33.destroy();
+        i2c.done();
+    }
+
+    #[test]
+    fn clear_display_buffer() {
+        let expectations = [];
+
+        let mut i2c = I2cMock::new(&expectations);
+        let mut ht16k33 = HT16K33::new(i2c, ADDRESS, None).unwrap();
+
+        // Clear the display buffer.
+        ht16k33.clear_display_buffer();
+
+        let &buffer = ht16k33.get_display_buffer();
+
+        // Ensure it's still the expected size.
+        assert_eq!(buffer.len(), ROWS_SIZE);
+
+        for row in buffer.iter() {
+            // We just cleared this buffer, it should be all zeros.
+            assert_eq!(*row, 0u8);
         }
 
-        // Set green LED based on 1st bit in color.
-        self.set_led(
-            c * 16 + a + 8,
-            if color & COLOR_GREEN > 0 { true } else { false },
-        )?;
+        i2c = ht16k33.destroy();
+        i2c.done();
+    }
 
-        // Set red LED based on 2nd bit in color.
-        self.set_led(c * 16 + a, if color & COLOR_RED > 0 { true } else { false })?;
+    #[test]
+    fn set_oscillator() {
+        let expectations = [I2cTransaction::write(
+            ADDRESS,
+            vec![super::SYSTEM_SET | super::Oscillator::Off.value()],
+        )];
 
-        Ok(())
+        let mut i2c = I2cMock::new(&expectations);
+        let mut ht16k33 = HT16K33::new(i2c, ADDRESS, None).unwrap();
+
+        ht16k33.set_oscillator(super::Oscillator::Off).unwrap();
+
+        i2c = ht16k33.destroy();
+        i2c.done();
+    }
+
+    #[test]
+    fn set_display() {
+        let expectations = [I2cTransaction::write(
+            ADDRESS,
+            vec![super::DISPLAY_SET | super::Display::Off.value() | super::Blink::Off.value()],
+        )];
+
+        let mut i2c = I2cMock::new(&expectations);
+        let mut ht16k33 = HT16K33::new(i2c, ADDRESS, None).unwrap();
+
+        ht16k33
+            .set_display(super::Display::Off, super::Blink::Off)
+            .unwrap();
+
+        i2c = ht16k33.destroy();
+        i2c.done();
+    }
+
+    #[test]
+    fn set_dimming() {
+        let expectations = [I2cTransaction::write(
+            ADDRESS,
+            vec![super::DIMMING_SET | Dimming::MaxBrightness.value()],
+        )];
+
+        let mut i2c = I2cMock::new(&expectations);
+        let mut ht16k33 = HT16K33::new(i2c, ADDRESS, None).unwrap();
+
+        ht16k33.set_dimming(Dimming::MaxBrightness).unwrap();
+
+        i2c = ht16k33.destroy();
+        i2c.done();
+    }
+
+    #[test]
+    fn set_led() {
+        let expectations = [I2cTransaction::write(
+            ADDRESS,
+            vec![super::DATA_ADDRESS | 1u8, 0b1000_0000],
+        )];
+
+        let mut i2c = I2cMock::new(&expectations);
+        let mut ht16k33 = HT16K33::new(i2c, ADDRESS, None).unwrap();
+
+        ht16k33
+            .set_led(LedLocation { row: 1, common: 7 }, true)
+            .unwrap();
+
+        i2c = ht16k33.destroy();
+        i2c.done();
+    }
+
+    #[test]
+    fn write_display_buffer() {
+        let mut write_buffer = vec![super::DATA_ADDRESS];
+        write_buffer.extend([0; super::ROWS_SIZE].iter().cloned());
+
+        let expectations = [I2cTransaction::write(ADDRESS, write_buffer)];
+
+        let mut i2c = I2cMock::new(&expectations);
+        let mut ht16k33 = HT16K33::new(i2c, ADDRESS, None).unwrap();
+
+        ht16k33.write_display_buffer().unwrap();
+
+        i2c = ht16k33.destroy();
+        i2c.done();
+    }
+
+    #[test]
+    fn read_display_buffer() {
+        let mut read_buffer = vec![0; super::ROWS_SIZE];
+        read_buffer[1] = 1;
+        read_buffer[15] = 1;
+
+        let expectations = [I2cTransaction::write_read(
+            ADDRESS,
+            vec![super::DATA_ADDRESS],
+            read_buffer,
+        )];
+
+        let mut i2c = I2cMock::new(&expectations);
+        let mut ht16k33 = HT16K33::new(i2c, ADDRESS, None).unwrap();
+
+        ht16k33.read_display_buffer().unwrap();
+
+        let &buffer = ht16k33.get_display_buffer();
+
+        for value in 0..buffer.len() {
+            match value {
+                1 | 15 => assert_eq!(buffer[value], 1),
+                _ => assert_eq!(buffer[value], 0),
+            }
+        }
+
+        i2c = ht16k33.destroy();
+        i2c.done();
     }
 }
