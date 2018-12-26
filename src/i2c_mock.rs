@@ -75,17 +75,19 @@ impl I2cMock {
     ///
     /// # }
     /// ```
-    pub fn new<L>(logger: L) -> I2cMock
+    pub fn new<L>(logger: L) -> Self
     where
         L: Into<Option<Logger>>,
     {
-        let logger = logger.into().unwrap_or(Logger::root(StdLog.fuse(), o!()));
+        let logger = logger
+            .into()
+            .unwrap_or_else(|| Logger::root(StdLog.fuse(), o!()));
 
         trace!(logger, "Constructing I2cMock");
 
         I2cMock {
             data_values: [0; ROWS_SIZE],
-            logger: logger,
+            logger,
         }
     }
 }
@@ -129,11 +131,11 @@ impl hal::blocking::i2c::WriteRead for I2cMock {
         trace!(self.logger, "write_read"; "address" => address, "bytes" => format!("{:?}", bytes), "buffer" => format!("{:?}", buffer));
 
         // The `bytes` have the `data_address` command + index to start reading from,
-        // need to clear the data address to extract the starting index.
+        // need to clear the command to extract the starting index.
         let mut data_offset = (bytes[0] ^ DATA_ADDRESS) as usize;
 
-        for index in 0..buffer.len() {
-            buffer[index] = self.data_values[data_offset];
+        for value in buffer.iter_mut() {
+            *value = self.data_values[data_offset];
 
             // The HT16K33 supports auto-increment and wrap-around, emulate that.
             data_offset = (data_offset + 1) % self.data_values.len();
@@ -187,8 +189,8 @@ impl hal::blocking::i2c::Write for I2cMock {
         let mut data_offset = (bytes[0] ^ DATA_ADDRESS) as usize;
         let data = &bytes[1..];
 
-        for index in 0..data.len() {
-            self.data_values[data_offset] = data[index];
+        for value in data.iter() {
+            self.data_values[data_offset] = *value;
 
             // The HT16K33 supports auto-increment and wrap-around, emulate that.
             data_offset = (data_offset + 1) % self.data_values.len();
