@@ -7,14 +7,12 @@ rust:
     - nightly
 os:
     # OSX is explicitly `include`d in the matrix below as we don't need to build
-    # all the linux 32/64+gnu/musl combinations for it.
+    # all the linux 32/64+gnu combinations for it.
     - linux
 env:
     matrix:
         - TARGET=x86_64-unknown-linux-gnu
-        - TARGET=x86_64-unknown-linux-musl
         - TARGET=i686-unknown-linux-gnu
-        - TARGET=i686-unknown-linux-musl
     global:
         # Default target on `travis-ci`, used as conditional check in the `install` stage.
         - HOST=x86_64-unknown-linux-gnu
