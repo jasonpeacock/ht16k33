@@ -40,6 +40,14 @@
 //! # }
 //! ```
 //!
+//! ## Embedded platforms
+//!
+//! Using this crate without default features in your `Cargo.toml` like so:
+//! ```toml
+//! [dependencies]
+//! htk16k33 = { version = "*", features = [] }
+//! ```
+//!
 //! ## All platforms, using I2C simulation
 //!
 //! Not all platforms have I2C support. The provided `ht16k33::i2c_mock` implements the

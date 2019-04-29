@@ -29,4 +29,3 @@ serde              = { version = "1.0", optional = true, features = ["derive"] }
 failure            = "0.1"
 embedded-hal-mock  = "0.4"
 version-sync       = "0.6"
-heapless           = "0.4"
