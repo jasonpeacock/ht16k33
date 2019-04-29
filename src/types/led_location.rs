@@ -1,11 +1,9 @@
-use errors::ValidationError;
+use crate::constants::{COMMONS_SIZE, ROWS_SIZE};
+use crate::errors::ValidationError;
+use crate::types::DisplayData;
+use crate::types::DisplayDataAddress;
 
-use std::fmt;
-
-use constants::{COMMONS_SIZE, ROWS_SIZE};
-
-use types::DisplayData;
-use types::DisplayDataAddress;
+use core::fmt;
 
 /// Represents the LED location.
 ///
@@ -15,13 +13,11 @@ use types::DisplayDataAddress;
 /// # Example
 ///
 /// ```
-/// # extern crate failure;
-/// extern crate ht16k33;
-/// # use failure::Error;
 /// use ht16k33::LedLocation;
 /// use ht16k33::DisplayData;
 /// use ht16k33::DisplayDataAddress;
-/// # fn main() -> Result<(), Error>{
+/// use ht16k33::ValidationError;
+/// # fn main() -> Result<(), ValidationError>{
 ///
 /// let row = 1u8;
 /// let common = 2u8;
@@ -66,7 +62,6 @@ impl LedLocation {
     /// [`ht16k33::ValidationError::ValueTooLarge`]: enum.ValidationError.html#variant.ValueTooLarge
     ///
     /// ```should_panic
-    /// # extern crate ht16k33;
     /// use ht16k33::LedLocation;
     /// use ht16k33::ValidationError;
     /// # use ht16k33::ROWS_SIZE;
@@ -85,7 +80,7 @@ impl LedLocation {
     pub fn new(row: u8, common: u8) -> Result<Self, ValidationError> {
         if row >= ROWS_SIZE as u8 {
             return Err(ValidationError::ValueTooLarge {
-                name: "Row".to_string(),
+                name: "row",
                 value: row,
                 limit: ROWS_SIZE as u8,
                 inclusive: false,
@@ -94,7 +89,7 @@ impl LedLocation {
 
         if common >= COMMONS_SIZE as u8 {
             return Err(ValidationError::ValueTooLarge {
-                name: "Common".to_string(),
+                name: "common",
                 value: common,
                 limit: COMMONS_SIZE as u8,
                 inclusive: false,

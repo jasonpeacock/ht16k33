@@ -1,5 +1,5 @@
-use std::default;
-use std::fmt;
+use bitflags::bitflags;
+use core::fmt;
 
 bitflags! {
     /// Display RAM data address.
@@ -39,7 +39,7 @@ bitflags! {
     }
 }
 
-impl default::Default for DisplayDataAddress {
+impl Default for DisplayDataAddress {
     fn default() -> DisplayDataAddress {
         DisplayDataAddress::ROW_0
     }

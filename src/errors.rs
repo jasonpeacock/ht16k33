@@ -1,4 +1,4 @@
-use std::fmt;
+use core::fmt;
 
 /// Errors encountered during validation.
 #[derive(Debug)]
@@ -6,7 +6,7 @@ pub enum ValidationError {
     /// The value is too large.
     ValueTooLarge {
         /// Name of the value.
-        name: String,
+        name: &'static str,
         /// Value that failed validation.
         value: u8,
         /// Limit that the value exceeded.
@@ -15,6 +15,12 @@ pub enum ValidationError {
         inclusive: bool,
     },
 }
+
+#[cfg(feature = "std")]
+extern crate std;
+
+#[cfg(feature = "std")]
+impl std::error::Error for ValidationError {}
 
 impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
