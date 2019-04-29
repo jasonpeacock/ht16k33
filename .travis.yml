@@ -50,5 +50,5 @@ install:
 
 script:
     # Incorporate `TARGET` env var to the build and test process.
-    - cargo build --target $TARGET --verbose
+    - cargo build --target $TARGET --verbose --no-default-features
     - cargo test --target $TARGET --verbose
