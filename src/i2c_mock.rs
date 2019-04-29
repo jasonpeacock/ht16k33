@@ -4,6 +4,8 @@
 //! not have I2C support.
 extern crate embedded_hal as hal;
 
+use std::fmt;
+
 use slog::Drain;
 use slog::Logger;
 use slog_stdlog::StdLog;
@@ -12,9 +14,14 @@ use constants::ROWS_SIZE;
 use types::DisplayDataAddress;
 
 /// Mock error to satisfy the I2C trait.
-#[derive(Debug, Fail)]
-#[fail(display = "I2cMock Error")]
+#[derive(Debug)]
 pub struct I2cMockError;
+
+impl fmt::Display for I2cMockError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "I2c MockError")
+    }
+}
 
 /// The mock I2C state.
 ///

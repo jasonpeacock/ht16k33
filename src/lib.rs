@@ -70,13 +70,9 @@
 #![doc(html_root_url = "https://docs.rs/ht16k33/0.3.0")]
 #![deny(missing_docs)]
 extern crate embedded_hal as hal;
-extern crate failure;
 
 #[macro_use]
 extern crate bitflags;
-
-#[macro_use]
-extern crate failure_derive;
 
 #[cfg(feature = "serde")]
 #[macro_use]
