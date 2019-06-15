@@ -1,5 +1,5 @@
-use std::default;
-use std::fmt;
+use bitflags::bitflags;
+use core::fmt;
 
 bitflags! {
     /// RAM data for LED display.
@@ -27,7 +27,7 @@ bitflags! {
     }
 }
 
-impl default::Default for DisplayData {
+impl Default for DisplayData {
     fn default() -> DisplayData {
         DisplayData::COMMON_NONE
     }

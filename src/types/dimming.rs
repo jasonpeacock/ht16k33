@@ -1,7 +1,6 @@
-use errors::ValidationError;
-
-use std::default;
-use std::fmt;
+use crate::errors::ValidationError;
+use bitflags::bitflags;
+use core::fmt;
 
 bitflags! {
     /// Display dimming.
@@ -58,7 +57,7 @@ bitflags! {
     }
 }
 
-impl default::Default for Dimming {
+impl Default for Dimming {
     fn default() -> Dimming {
         Dimming::BRIGHTNESS_MAX
     }
@@ -88,11 +87,9 @@ impl Dimming {
     /// # Example
     ///
     /// ```
-    /// # extern crate failure;
-    /// # extern crate ht16k33;
-    /// # use failure::Error;
     /// use ht16k33::Dimming;
-    /// # fn main() -> Result<(), Error> {
+    /// # use ht16k33::ValidationError;
+    /// # fn main() -> Result<(), ValidationError> {
     ///
     /// let brightness = Dimming::from_u8(1u8)?;
     ///
@@ -105,7 +102,6 @@ impl Dimming {
     /// # Error Example
     ///
     /// ```should_panic
-    /// # extern crate ht16k33;
     /// use ht16k33::Dimming;
     /// use ht16k33::ValidationError;
     /// # fn main() {
@@ -128,7 +124,7 @@ impl Dimming {
     pub fn from_u8(value: u8) -> Result<Self, ValidationError> {
         if value > Dimming::BRIGHTNESS_MAX.bits() {
             return Err(ValidationError::ValueTooLarge {
-                name: "Dimming".to_string(),
+                name: "dimming",
                 value,
                 limit: Dimming::BRIGHTNESS_MAX.bits(),
                 inclusive: true,

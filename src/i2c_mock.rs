@@ -2,67 +2,49 @@
 //!
 //! A mock I2C library to support using the [HT16K33](../struct.HT16K33.html) driver on non-Linux systems that do
 //! not have I2C support.
-extern crate embedded_hal as hal;
+use embedded_hal as hal;
 
-use slog::Drain;
-use slog::Logger;
-use slog_stdlog::StdLog;
+use core::fmt;
 
-use constants::ROWS_SIZE;
-use types::DisplayDataAddress;
+use crate::constants::ROWS_SIZE;
+use crate::types::DisplayDataAddress;
 
 /// Mock error to satisfy the I2C trait.
-#[derive(Debug, Fail)]
-#[fail(display = "I2cMock Error")]
+#[derive(Debug)]
 pub struct I2cMockError;
+
+#[cfg(feature = "std")]
+impl std::error::Error for I2cMockError {}
+
+impl fmt::Display for I2cMockError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "I2c MockError")
+    }
+}
 
 /// The mock I2C state.
 ///
 /// # Example
 ///
 /// ```
-/// // NOTE: `None` is used for the Logger in these examples for convenience,
-/// // in practice using an actual logger is preferred.
-///
-/// extern crate ht16k33;
 /// use ht16k33::i2c_mock::I2cMock;
 /// # fn main() {
 ///
 /// // Create an I2cMock.
-/// let i2c_mock = I2cMock::new(None);
+/// let i2c_mock = I2cMock::new();
 ///
 /// # }
 /// ```
 pub struct I2cMock {
     /// Display RAM state.
     pub data_values: [u8; ROWS_SIZE],
-    logger: Logger,
 }
 
 impl I2cMock {
     /// Create an I2cMock.
-    ///
-    /// # Arguments
-    ///
-    /// * `logger` - A logging instance.
-    ///
-    /// # Notes
-    ///
-    /// `logger = None`, will log to the `slog-stdlog` drain. This makes the library
-    /// effectively work the same as if it was just using `log` instead of `slog`.
-    pub fn new<L>(logger: L) -> Self
-    where
-        L: Into<Option<Logger>>,
-    {
-        let logger = logger
-            .into()
-            .unwrap_or_else(|| Logger::root(StdLog.fuse(), o!()));
-
-        trace!(logger, "Constructing I2cMock");
-
+    pub fn new() -> Self {
         I2cMock {
             data_values: [0; ROWS_SIZE],
-            logger,
         }
     }
 }
@@ -81,12 +63,10 @@ impl hal::blocking::i2c::WriteRead for I2cMock {
     /// # Examples
     ///
     /// ```
-    /// # extern crate embedded_hal;
-    /// # extern crate ht16k33;
     /// # use embedded_hal::blocking::i2c::WriteRead;
     /// # use ht16k33::i2c_mock::I2cMock;
     /// # fn main() {
-    /// let mut i2c_mock = I2cMock::new(None);
+    /// let mut i2c_mock = I2cMock::new();
     ///
     /// let mut read_buffer = [0u8; 16];
     /// i2c_mock.write_read(0, &[ht16k33::DisplayDataAddress::ROW_0.bits()], &mut read_buffer);
@@ -95,12 +75,10 @@ impl hal::blocking::i2c::WriteRead for I2cMock {
     /// ```
     fn write_read(
         &mut self,
-        address: u8,
+        _address: u8,
         bytes: &[u8],
         buffer: &mut [u8],
     ) -> Result<(), Self::Error> {
-        trace!(self.logger, "write_read"; "address" => address, "bytes" => format!("{:?}", bytes), "buffer" => format!("{:?}", buffer));
-
         // The `bytes` have the `data_address` command + index to start reading from,
         // need to clear the command to extract the starting index.
         let mut data_offset = (bytes[0] ^ DisplayDataAddress::ROW_0.bits()) as usize;
@@ -129,12 +107,10 @@ impl hal::blocking::i2c::Write for I2cMock {
     /// # Examples
     ///
     /// ```
-    /// # extern crate embedded_hal;
-    /// # extern crate ht16k33;
     /// # use embedded_hal::blocking::i2c::Write;
     /// # use ht16k33::i2c_mock::I2cMock;
     /// # fn main() {
-    /// let mut i2c_mock = I2cMock::new(None);
+    /// let mut i2c_mock = I2cMock::new();
     ///
     /// // First value is the data address, remaining values are to be written
     /// // starting at the data address which auto-increments and then wraps.
@@ -144,9 +120,7 @@ impl hal::blocking::i2c::Write for I2cMock {
     ///
     /// # }
     /// ```
-    fn write(&mut self, address: u8, bytes: &[u8]) -> Result<(), Self::Error> {
-        trace!(self.logger, "write"; "address" => address, "bytes" => format!("{:?}", bytes));
-
+    fn write(&mut self, _address: u8, bytes: &[u8]) -> Result<(), Self::Error> {
         // "Command-only" writes are length 1 and write-only, and cannot be read back,
         // discard them for simplicity.
         if bytes.len() == 1 {
@@ -177,12 +151,12 @@ mod tests {
 
     #[test]
     fn new() {
-        let _i2c_mock = I2cMock::new(None);
+        let _i2c_mock = I2cMock::new();
     }
 
     #[test]
     fn write() {
-        let mut i2c_mock = I2cMock::new(None);
+        let mut i2c_mock = I2cMock::new();
 
         let write_buffer = [super::DisplayDataAddress::ROW_0.bits(), 1u8, 1u8];
         i2c_mock.write(ADDRESS, &write_buffer).unwrap();
@@ -205,7 +179,7 @@ mod tests {
 
     #[test]
     fn write_with_offset() {
-        let mut i2c_mock = I2cMock::new(None);
+        let mut i2c_mock = I2cMock::new();
 
         let offset = 4u8;
         let write_buffer = [super::DisplayDataAddress::ROW_0.bits() | offset, 1u8, 1u8];
@@ -229,7 +203,7 @@ mod tests {
 
     #[test]
     fn write_with_wraparound() {
-        let mut i2c_mock = I2cMock::new(None);
+        let mut i2c_mock = I2cMock::new();
 
         // Match the data values size, +2 to wrap around, +1 for the data command.
         let mut write_buffer = [1u8; super::ROWS_SIZE + 3];
@@ -259,7 +233,7 @@ mod tests {
 
     #[test]
     fn write_with_wraparound_and_offset() {
-        let mut i2c_mock = I2cMock::new(None);
+        let mut i2c_mock = I2cMock::new();
 
         // Match the data values size, +2 to wrap around, +1 for the data command.
         let mut write_buffer = [1u8; super::ROWS_SIZE + 3];
@@ -291,7 +265,7 @@ mod tests {
 
     #[test]
     fn write_read() {
-        let mut i2c_mock = I2cMock::new(None);
+        let mut i2c_mock = I2cMock::new();
 
         i2c_mock.data_values[0] = 1;
         i2c_mock.data_values[1] = 1;
@@ -323,7 +297,7 @@ mod tests {
 
     #[test]
     fn write_read_offset() {
-        let mut i2c_mock = I2cMock::new(None);
+        let mut i2c_mock = I2cMock::new();
 
         i2c_mock.data_values[2] = 1;
         i2c_mock.data_values[3] = 1;
@@ -357,7 +331,7 @@ mod tests {
 
     #[test]
     fn write_read_wraparound() {
-        let mut i2c_mock = I2cMock::new(None);
+        let mut i2c_mock = I2cMock::new();
 
         i2c_mock.data_values[2] = 1;
         i2c_mock.data_values[3] = 1;
@@ -390,7 +364,7 @@ mod tests {
 
     #[test]
     fn write_read_wraparound_and_offset() {
-        let mut i2c_mock = I2cMock::new(None);
+        let mut i2c_mock = I2cMock::new();
 
         i2c_mock.data_values[0] = 1;
         i2c_mock.data_values[1] = 1;

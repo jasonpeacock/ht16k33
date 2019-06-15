@@ -13,7 +13,7 @@ Currently, only the 28-pin SOP package type is supported.
 # Features
 
 - [x] Uses the [`embedded-hal`](https://crates.io/crates/embedded-hal) hardware abstraction.
-- [ ] Supports `no_std` for embedded devices.
+- [x] Supports `no_std` for embedded devices.
 - [ ] Supports all 20/24/28-pin SOP package types.
 - [x] Displays all 128 LEDs.
 - [ ] Reads keyscan.

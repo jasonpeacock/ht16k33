@@ -1,5 +1,5 @@
-use std::default;
-use std::fmt;
+use bitflags::bitflags;
+use core::fmt;
 
 bitflags! {
     /// The LED display state.
@@ -23,7 +23,7 @@ bitflags! {
     }
 }
 
-impl default::Default for Display {
+impl Default for Display {
     fn default() -> Display {
         Display::OFF
     }

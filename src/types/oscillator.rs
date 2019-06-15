@@ -1,5 +1,5 @@
-use std::default;
-use std::fmt;
+use bitflags::bitflags;
+use core::fmt;
 
 bitflags! {
     /// System oscillator setup and control.
@@ -15,7 +15,7 @@ bitflags! {
     }
 }
 
-impl default::Default for Oscillator {
+impl Default for Oscillator {
     fn default() -> Oscillator {
         Oscillator::OFF
     }
