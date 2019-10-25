@@ -10,7 +10,7 @@
 
 Currently, only the 28-pin SOP package type is supported.
 
-# Features
+## Features
 
 - [x] Uses the [`embedded-hal`](https://crates.io/crates/embedded-hal) hardware abstraction.
 - [x] Supports `no_std` for embedded devices.
@@ -20,11 +20,11 @@ Currently, only the 28-pin SOP package type is supported.
 - [ ] Manages interrupts.
 - [ ] Manages slave devices.
 
-# Support
+## Support
 
 For questions, issues, feature requests, and other changes, please file an [issue in the github project](https://github.com/jasonpeacock/ht16k33/issues).
 
-# License
+## License
 
 Licensed under either of
 
