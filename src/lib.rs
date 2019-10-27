@@ -45,7 +45,7 @@
 //! Using this crate without default features in your `Cargo.toml` like so:
 //! ```toml
 //! [dependencies]
-//! htk16k33 = { version = "*", features = [] }
+//! htk16k33 = { version = "*", default-features = false }
 //! ```
 //!
 //! ## All platforms, using I2C simulation
