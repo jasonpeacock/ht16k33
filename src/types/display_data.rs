@@ -1,3 +1,6 @@
+use crate::constants::COMMONS_SIZE;
+use crate::errors::ValidationError;
+
 use bitflags::bitflags;
 use core::fmt;
 
@@ -24,6 +27,55 @@ bitflags! {
         const COMMON_6 = 0b0100_0000;
         /// Led on common 7 enabled.
         const COMMON_7 = 0b1000_0000;
+    }
+}
+
+impl DisplayData {
+    /// Creates a new instance of DisplayData from a byte
+    ///
+    /// Internally calls `DisplayData::from_bits(..)` but it's unecessary as 
+    /// any byte can be repressented with the flags in DisplayData
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use ht16k33::DisplayData;
+    /// let data = DisplayData::from_byte(0b0010_0110);
+    ///
+    /// // Equvivalent to:
+    /// let data = DisplayData::from_bits(0b0010_0110).unwrap();
+    /// ```
+    pub fn from_byte(byte: u8) -> DisplayData {
+        match Self::from_bits(byte) {
+            Some(data) => data,
+            None => unreachable!()
+        }
+    }
+
+    /// Create a new instance of DisplayData from a number between 0..8.
+    /// This represents a single led in some row.
+    /// 
+    /// # Examples
+    /// 
+    /// ```
+    /// # use ht16k33::DisplayData;
+    /// # use ht16k33::ValidationError;
+    /// # fn main() -> Result<(), ValidationError> {
+    /// assert_eq!(DisplayData::try_from_common(4)?, DisplayData::COMMON_4);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn try_from_common(common: u8) -> Result<DisplayData, ValidationError> {
+        if common < COMMONS_SIZE as u8 {
+            Ok(DisplayData::from_bits_truncate(1 << common))
+        } else {
+            Err(ValidationError::ValueTooLarge {
+                name: "common",
+                value: common,
+                limit: COMMONS_SIZE as u8,
+                inclusive: false,
+            })
+        }
     }
 }
 

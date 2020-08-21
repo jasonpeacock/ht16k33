@@ -1,8 +1,9 @@
-use crate::constants::{COMMONS_SIZE, ROWS_SIZE};
+use crate::constants::ROWS_SIZE;
 use crate::errors::ValidationError;
 use crate::types::DisplayData;
 use crate::types::DisplayDataAddress;
 
+use core::convert::TryFrom;
 use core::fmt;
 
 /// Represents the LED location.
@@ -78,33 +79,22 @@ impl LedLocation {
     /// ```
     #[allow(clippy::new_ret_no_self)]
     pub fn new(row: u8, common: u8) -> Result<Self, ValidationError> {
-        if row >= ROWS_SIZE as u8 {
-            return Err(ValidationError::ValueTooLarge {
+        let row = DisplayDataAddress::try_from(row)
+            .map_err(|_| ValidationError::ValueTooLarge {
                 name: "row",
                 value: row,
                 limit: ROWS_SIZE as u8,
                 inclusive: false,
-            });
-        }
+            })?;
 
-        if common >= COMMONS_SIZE as u8 {
-            return Err(ValidationError::ValueTooLarge {
-                name: "common",
-                value: common,
-                limit: COMMONS_SIZE as u8,
-                inclusive: false,
-            });
-        }
-
-        let row = DisplayDataAddress::from_bits_truncate(row);
-        let common = DisplayData::from_bits_truncate(1 << common);
+        let common = DisplayData::try_from_common(common)?;
 
         Ok(LedLocation { row, common })
     }
 
     /// Return the `row` value.
     pub fn row_as_index(self) -> usize {
-        self.row.bits() as usize
+        self.row as usize
     }
 }
 
