@@ -34,7 +34,7 @@ impl DisplayData {
     /// Creates a new instance of DisplayData from a byte
     ///
     /// Internally calls `DisplayData::from_bits(..)` but it's unecessary as 
-    /// any byte can be repressented with the flags in DisplayData
+    /// any byte can be represented with the flags in DisplayData
     ///
     /// # Examples
     ///
