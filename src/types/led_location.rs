@@ -91,6 +91,12 @@ impl LedLocation {
 
         Ok(LedLocation { row, common })
     }
+
+    /// Return the `row` value.
+    #[deprecated(since="0.5.0", note="Use row as usize instead")] // TODO Need real version
+    pub fn row_as_index(self) -> usize {
+        self.row as usize
+    }
 }
 
 #[cfg(test)]

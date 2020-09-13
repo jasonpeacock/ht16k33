@@ -98,6 +98,7 @@ pub struct HT16K33<I2C> {
 
     /// Represents the desired values of the device, may not match
     /// the current values if it has not been written recently.
+    /// Remember to use `.write_display_buffer()` after changing buffer.
     pub buffer: [u8; ROWS_SIZE],
 
     // The following values are write-only registers and cannot
@@ -220,13 +221,9 @@ where
     ///
     /// # }
     /// ```
+    #[deprecated(since="1.2.3", note="Use field buffer instead")] // TODO Need real version
     pub fn display_buffer(&self) -> &[u8; ROWS_SIZE] {
         &self.buffer
-    }
-
-    /// MISSING DOCS
-    pub fn mut_display_buffer(&mut self) -> &mut [u8; ROWS_SIZE] {
-        &mut self.buffer
     }
 
     /// Return the current oscillator state.
