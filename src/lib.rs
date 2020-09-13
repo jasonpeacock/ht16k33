@@ -221,7 +221,7 @@ where
     ///
     /// # }
     /// ```
-    #[deprecated(since="1.2.3", note="Use field buffer instead")] // TODO Need real version
+    #[deprecated(since = "1.2.3", note = "Use field `buffer` instead")] // TODO Need real version
     pub fn display_buffer(&self) -> &[u8; ROWS_SIZE] {
         &self.buffer
     }
@@ -321,7 +321,6 @@ where
     pub fn update_display_buffer(&mut self, location: LedLocation, enabled: bool) {
         // TODO Validate `address` parameter.
         // Turn on/off the specified LED.
-
         if enabled {
             self.buffer[location.row as usize] |= location.common.bits();
         } else {
@@ -805,11 +804,7 @@ mod tests {
         read_buffer[1] = 0b0000_0010;
         read_buffer[15] = 0b0000_0010;
 
-        let expectations = [I2cTransaction::write_read(
-            ADDRESS,
-            vec![0],
-            read_buffer,
-        )];
+        let expectations = [I2cTransaction::write_read(ADDRESS, vec![0], read_buffer)];
 
         let mut i2c = I2cMock::new(&expectations);
         let mut ht16k33 = HT16K33::new(i2c, ADDRESS);

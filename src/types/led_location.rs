@@ -93,7 +93,7 @@ impl LedLocation {
     }
 
     /// Return the `row` value.
-    #[deprecated(since="0.5.0", note="Use row as usize instead")] // TODO Need real version
+    #[deprecated(since = "0.5.0", note = "Use `row as usize` instead")] // TODO Need real version
     pub fn row_as_index(self) -> usize {
         self.row as usize
     }
