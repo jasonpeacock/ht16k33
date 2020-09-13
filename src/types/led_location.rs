@@ -91,11 +91,6 @@ impl LedLocation {
 
         Ok(LedLocation { row, common })
     }
-
-    /// Return the `row` value.
-    pub fn row_as_index(self) -> usize {
-        self.row as usize
-    }
 }
 
 #[cfg(test)]
@@ -145,6 +140,6 @@ mod tests {
     #[test]
     fn row_as_index() {
         let location = LedLocation::new(2, 2).unwrap();
-        assert_eq!(2usize, location.row_as_index());
+        assert_eq!(2, location.row as usize);
     }
 }
