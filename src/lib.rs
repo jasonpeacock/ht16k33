@@ -328,6 +328,39 @@ where
         }
     }
 
+    /// Update the mask of an entire row.
+    ///
+    /// The buffer must be written using [write_display_buffer()](struct.HT16K33.html#method.write_display_buffer)
+    /// for the change to be displayed.
+    ///
+    /// # Arguments
+    ///
+    /// * `row` - The row to update.
+    /// * `mask` - Set the row to this mask.
+    /// ```
+    /// # use ht16k33::i2c_mock::I2cMock;
+    /// # use ht16k33::HT16K33;
+    /// # use ht16k33::ValidationError;
+    /// use ht16k33::{DisplayData, DisplayDataAddress};
+    /// # fn main() -> Result<(), ValidationError> {
+    /// # let mut i2c = I2cMock::new();
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address);
+    ///
+    /// ht16k33.update_row_mask(
+    ///     DisplayDataAddress::ROW_0 as usize,
+    ///     DisplayData::from_bits(0b1100_1100).unwrap().bits()
+    /// );
+    /// ht16k33.write_display_buffer();
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn update_row_mask(&mut self, row: usize, mask: u8) {
+        // TODO Validate `address` parameter.
+        self.buffer[row] = mask;
+    }
+
     /// Clear contents of the display buffer.
     ///
     /// The buffer must be written using [write_display_buffer()](struct.HT16K33.html#method.write_display_buffer)
@@ -481,6 +514,36 @@ where
             self.address,
             &[location.row as u8, self.buffer[location.row as usize]],
         )
+    }
+
+    /// Set the mask of an entire row.
+    ///
+    /// # Arguments
+    ///
+    /// * `row` - The row to update.
+    /// * `mask` - Set the row to this mask.
+    /// ```
+    /// # use ht16k33::i2c_mock::I2cMock;
+    /// # use ht16k33::HT16K33;
+    /// # use failure::Error;
+    /// use ht16k33::{DisplayData, DisplayDataAddress};
+    /// # fn main() -> Result<(), Error> {
+    /// # let mut i2c = I2cMock::new();
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address);
+    ///
+    /// ht16k33.set_row_mask(
+    ///     DisplayDataAddress::ROW_0 as usize,
+    ///     DisplayData::from_bits(0b0011_0011).unwrap().bits()
+    /// )?;
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn set_row_mask(&mut self, row: usize, mask: u8) -> Result<(), E> {
+        self.update_row_mask(row, mask);
+        self.i2c.write(self.address, &[row as u8, self.buffer[row]])
     }
 
     /// Write the display buffer to the HT16K33 chip.
@@ -663,6 +726,29 @@ mod tests {
     }
     
     #[test]
+    fn update_row_mask() {
+        let expectations = [];
+
+        let mut i2c = I2cMock::new(&expectations);
+        let mut ht16k33 = HT16K33::new(i2c, ADDRESS);
+
+        let first_row = 0;
+        let second_row = 1;
+
+        ht16k33.update_row_mask(first_row, 0b1111_0000);
+        assert_eq!(ht16k33.display_buffer()[0], 0b1111_0000);
+
+        ht16k33.update_row_mask(second_row, 0b0000_1111);
+        assert_eq!(ht16k33.display_buffer()[1], 0b0000_1111);
+
+        ht16k33.update_row_mask(first_row, 0b1001_1111);
+        assert_eq!(ht16k33.display_buffer()[0], 0b1001_1111);
+
+        i2c = ht16k33.destroy();
+        i2c.done();
+    }
+
+    #[test]
     fn update_display_buffer() {
         let expectations = [];
 
@@ -776,6 +862,24 @@ mod tests {
 
         ht16k33
             .set_led(LedLocation::new(1, 7).unwrap(), true)
+            .unwrap();
+
+        i2c = ht16k33.destroy();
+        i2c.done();
+    }
+
+    #[test]
+    fn set_row_mask() {
+        let expectations = [I2cTransaction::write(ADDRESS, vec![5u8, 0b1100_0011])];
+
+        let mut i2c = I2cMock::new(&expectations);
+        let mut ht16k33 = HT16K33::new(i2c, ADDRESS);
+
+        ht16k33
+            .set_row_mask(
+                DisplayDataAddress::ROW_5 as usize,
+                DisplayData::from_bits(0b1100_0011).unwrap().bits(),
+            )
             .unwrap();
 
         i2c = ht16k33.destroy();
