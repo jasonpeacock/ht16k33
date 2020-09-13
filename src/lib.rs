@@ -224,6 +224,10 @@ where
         &self.buffer
     }
 
+    pub fn mut_display_buffer(&mut self) -> &mut [DisplayData; ROWS_SIZE] {
+        &mut self.buffer
+    }
+
     /// Return the current oscillator state.
     ///
     /// # Examples
