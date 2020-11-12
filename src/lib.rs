@@ -96,9 +96,10 @@ pub struct HT16K33<I2C> {
     // Device I2C address.
     address: u8,
 
-    // Represents the desired values of the device, may not match
-    // the current values if it has not been written recently.
-    buffer: [DisplayData; ROWS_SIZE],
+    /// Represents the desired values of the device, may not match
+    /// the current values if it has not been written recently.
+    /// Remember to use `.write_display_buffer()` after changing buffer.
+    pub buffer: [u8; ROWS_SIZE],
 
     // The following values are write-only registers and cannot
     // be queried from the device. We need to track their state
@@ -140,7 +141,7 @@ where
         HT16K33 {
             address,
             i2c,
-            buffer: [DisplayData::empty(); ROWS_SIZE],
+            buffer: [0; ROWS_SIZE],
             oscillator_state: Oscillator::OFF,
             display_state: Display::OFF,
             dimming_state: Dimming::BRIGHTNESS_MAX,
@@ -220,7 +221,8 @@ where
     ///
     /// # }
     /// ```
-    pub fn display_buffer(&self) -> &[DisplayData; ROWS_SIZE] {
+    #[deprecated(since = "1.2.3", note = "Use field `buffer` instead")] // TODO Need real version
+    pub fn display_buffer(&self) -> &[u8; ROWS_SIZE] {
         &self.buffer
     }
 
@@ -318,9 +320,45 @@ where
     /// ```
     pub fn update_display_buffer(&mut self, location: LedLocation, enabled: bool) {
         // TODO Validate `address` parameter.
-
         // Turn on/off the specified LED.
-        self.buffer[location.row_as_index()].set(location.common, enabled);
+        if enabled {
+            self.buffer[location.row as usize] |= location.common.bits();
+        } else {
+            self.buffer[location.row as usize] &= !location.common.bits();
+        }
+    }
+
+    /// Update the mask of an entire row.
+    ///
+    /// The buffer must be written using [write_display_buffer()](struct.HT16K33.html#method.write_display_buffer)
+    /// for the change to be displayed.
+    ///
+    /// # Arguments
+    ///
+    /// * `row` - The row to update.
+    /// * `mask` - Set the row to this mask.
+    /// ```
+    /// # use ht16k33::i2c_mock::I2cMock;
+    /// # use ht16k33::HT16K33;
+    /// # use ht16k33::ValidationError;
+    /// use ht16k33::{DisplayData, DisplayDataAddress};
+    /// # fn main() -> Result<(), ValidationError> {
+    /// # let mut i2c = I2cMock::new();
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address);
+    ///
+    /// ht16k33.update_row_mask(
+    ///     DisplayDataAddress::ROW_0 as usize,
+    ///     DisplayData::from_bits(0b1100_1100).unwrap().bits()
+    /// );
+    /// ht16k33.write_display_buffer();
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn update_row_mask(&mut self, row: usize, mask: u8) {
+        // TODO Validate `address` parameter.
+        self.buffer[row] = mask;
     }
 
     /// Clear contents of the display buffer.
@@ -343,11 +381,7 @@ where
     /// # }
     /// ```
     pub fn clear_display_buffer(&mut self) {
-        // TODO is there any advantage to iteration vs just assigning
-        // a new, empty `[0; ROWS_SIZE]` array?
-        for row in self.buffer.iter_mut() {
-            *row = DisplayData::COMMON_NONE;
-        }
+        self.buffer = [0; ROWS_SIZE];
     }
 
     /// Control the oscillator.
@@ -379,9 +413,7 @@ where
         self.i2c.write(
             self.address,
             &[(Oscillator::COMMAND | self.oscillator_state).bits()],
-        )?;
-
-        Ok(())
+        )
     }
 
     /// Control the display.
@@ -413,9 +445,7 @@ where
         self.i2c.write(
             self.address,
             &[(Display::COMMAND | self.display_state).bits()],
-        )?;
-
-        Ok(())
+        )
     }
 
     /// Control the display dimming.
@@ -447,9 +477,7 @@ where
         self.i2c.write(
             self.address,
             &[(Dimming::COMMAND | self.dimming_state).bits()],
-        )?;
-
-        Ok(())
+        )
     }
 
     /// Control an LED.
@@ -484,13 +512,38 @@ where
 
         self.i2c.write(
             self.address,
-            &[
-                location.row.bits(),
-                self.buffer[location.row_as_index()].bits(),
-            ],
-        )?;
+            &[location.row as u8, self.buffer[location.row as usize]],
+        )
+    }
 
-        Ok(())
+    /// Set the mask of an entire row.
+    ///
+    /// # Arguments
+    ///
+    /// * `row` - The row to update.
+    /// * `mask` - Set the row to this mask.
+    /// ```
+    /// # use ht16k33::i2c_mock::I2cMock;
+    /// # use ht16k33::HT16K33;
+    /// # use failure::Error;
+    /// use ht16k33::{DisplayData, DisplayDataAddress};
+    /// # fn main() -> Result<(), Error> {
+    /// # let mut i2c = I2cMock::new();
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address);
+    ///
+    /// ht16k33.set_row_mask(
+    ///     DisplayDataAddress::ROW_0 as usize,
+    ///     DisplayData::from_bits(0b0011_0011).unwrap().bits()
+    /// )?;
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn set_row_mask(&mut self, row: usize, mask: u8) -> Result<(), E> {
+        self.update_row_mask(row, mask);
+        self.i2c.write(self.address, &[row as u8, self.buffer[row]])
     }
 
     /// Write the display buffer to the HT16K33 chip.
@@ -513,15 +566,13 @@ where
     /// ```
     pub fn write_display_buffer(&mut self) -> Result<(), E> {
         let mut write_buffer = [0u8; ROWS_SIZE + 1];
-        write_buffer[0] = DisplayDataAddress::ROW_0.bits();
+        write_buffer[0] = 0;
 
-        for value in 0usize..self.buffer.len() {
-            write_buffer[value + 1] = self.buffer[value].bits();
+        for value in 0..self.buffer.len() {
+            write_buffer[value + 1] = self.buffer[value];
         }
 
-        self.i2c.write(self.address, &write_buffer)?;
-
-        Ok(())
+        self.i2c.write(self.address, &write_buffer)
     }
 
     /// Read the display buffer from the HT16K33 chip.
@@ -545,14 +596,10 @@ where
     pub fn read_display_buffer(&mut self) -> Result<(), E> {
         let mut read_buffer = [0u8; ROWS_SIZE];
 
-        self.i2c.write_read(
-            self.address,
-            &[DisplayDataAddress::ROW_0.bits()],
-            &mut read_buffer,
-        )?;
+        self.i2c.write_read(self.address, &[0], &mut read_buffer)?;
 
         for (index, value) in read_buffer.iter().enumerate() {
-            self.buffer[index] = DisplayData::from_bits_truncate(*value);
+            self.buffer[index] = *value;
         }
 
         Ok(())
@@ -584,7 +631,7 @@ mod tests {
 
     #[test]
     fn initialize() {
-        let mut write_buffer = vec![super::DisplayDataAddress::ROW_0.bits()];
+        let mut write_buffer = vec![0];
         write_buffer.extend([0; super::ROWS_SIZE].iter().cloned());
 
         let expectations = [
@@ -624,9 +671,9 @@ mod tests {
         // Ensure it's the expected size.
         assert_eq!(buffer.len(), ROWS_SIZE);
 
-        for row in buffer.iter() {
+        for buff in buffer.iter() {
             // And because we just initialized this buffer, it should be all zeros.
-            assert_eq!(row.bits(), 0u8);
+            assert_eq!(*buff, 0u8);
         }
 
         i2c = ht16k33.destroy();
@@ -677,6 +724,29 @@ mod tests {
         i2c = ht16k33.destroy();
         i2c.done();
     }
+    
+    #[test]
+    fn update_row_mask() {
+        let expectations = [];
+
+        let mut i2c = I2cMock::new(&expectations);
+        let mut ht16k33 = HT16K33::new(i2c, ADDRESS);
+
+        let first_row = 0;
+        let second_row = 1;
+
+        ht16k33.update_row_mask(first_row, 0b1111_0000);
+        assert_eq!(ht16k33.display_buffer()[0], 0b1111_0000);
+
+        ht16k33.update_row_mask(second_row, 0b0000_1111);
+        assert_eq!(ht16k33.display_buffer()[1], 0b0000_1111);
+
+        ht16k33.update_row_mask(first_row, 0b1001_1111);
+        assert_eq!(ht16k33.display_buffer()[0], 0b1001_1111);
+
+        i2c = ht16k33.destroy();
+        i2c.done();
+    }
 
     #[test]
     fn update_display_buffer() {
@@ -690,15 +760,15 @@ mod tests {
 
         // Turn on the LED.
         ht16k33.update_display_buffer(first_led, true);
-        assert_eq!(ht16k33.display_buffer()[1].bits(), 0b0001_0000);
+        assert_eq!(ht16k33.buffer[1], 0b0001_0000);
 
         // Turn on another LED.
         ht16k33.update_display_buffer(second_led, true);
-        assert_eq!(ht16k33.display_buffer()[1].bits(), 0b0011_0000);
+        assert_eq!(ht16k33.buffer[1], 0b0011_0000);
 
         // Turn off the first LED.
         ht16k33.update_display_buffer(first_led, false);
-        assert_eq!(ht16k33.display_buffer()[1].bits(), 0b0010_0000);
+        assert_eq!(ht16k33.buffer[1], 0b0010_0000);
 
         i2c = ht16k33.destroy();
         i2c.done();
@@ -726,9 +796,9 @@ mod tests {
         // Ensure it's still the expected size.
         assert_eq!(buffer.len(), ROWS_SIZE);
 
-        for row in buffer.iter() {
+        for buff in buffer.iter() {
             // We just cleared this buffer, it should be all zeros.
-            assert_eq!(row.bits(), 0u8);
+            assert_eq!(*buff, 0u8);
         }
 
         i2c = ht16k33.destroy();
@@ -799,8 +869,26 @@ mod tests {
     }
 
     #[test]
+    fn set_row_mask() {
+        let expectations = [I2cTransaction::write(ADDRESS, vec![5u8, 0b1100_0011])];
+
+        let mut i2c = I2cMock::new(&expectations);
+        let mut ht16k33 = HT16K33::new(i2c, ADDRESS);
+
+        ht16k33
+            .set_row_mask(
+                DisplayDataAddress::ROW_5 as usize,
+                DisplayData::from_bits(0b1100_0011).unwrap().bits(),
+            )
+            .unwrap();
+
+        i2c = ht16k33.destroy();
+        i2c.done();
+    }
+
+    #[test]
     fn write_display_buffer() {
-        let mut write_buffer = vec![super::DisplayDataAddress::ROW_0.bits()];
+        let mut write_buffer = vec![0];
         write_buffer.extend([0; super::ROWS_SIZE].iter().cloned());
 
         let expectations = [I2cTransaction::write(ADDRESS, write_buffer)];
@@ -820,11 +908,7 @@ mod tests {
         read_buffer[1] = 0b0000_0010;
         read_buffer[15] = 0b0000_0010;
 
-        let expectations = [I2cTransaction::write_read(
-            ADDRESS,
-            vec![super::DisplayDataAddress::ROW_0.bits()],
-            read_buffer,
-        )];
+        let expectations = [I2cTransaction::write_read(ADDRESS, vec![0], read_buffer)];
 
         let mut i2c = I2cMock::new(&expectations);
         let mut ht16k33 = HT16K33::new(i2c, ADDRESS);
@@ -835,8 +919,8 @@ mod tests {
 
         for value in 0..buffer.len() {
             match value {
-                1 | 15 => assert_eq!(buffer[value].bits(), 0b0000_0010),
-                _ => assert_eq!(buffer[value].bits(), 0),
+                1 | 15 => assert_eq!(buffer[value], 0b0000_0010),
+                _ => assert_eq!(buffer[value], 0),
             }
         }
 
