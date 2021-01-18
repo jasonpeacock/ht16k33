@@ -89,9 +89,11 @@ pub use types::{Dimming, Display, DisplayData, DisplayDataAddress, LedLocation, 
 pub use constants::{COMMONS_SIZE, ROWS_SIZE};
 use hal::blocking::i2c::{Write, WriteRead};
 
+use core::cell::RefCell;
+
 /// The HT16K33 state and configuration.
-pub struct HT16K33<I2C> {
-    i2c: I2C,
+pub struct HT16K33<'a, I2C> {
+    i2c: &'a RefCell<I2C>,
 
     // Device I2C address.
     address: u8,
@@ -108,7 +110,7 @@ pub struct HT16K33<I2C> {
     dimming_state: Dimming,
 }
 
-impl<I2C, E> HT16K33<I2C>
+impl<'a, I2C, E> HT16K33<'a, I2C>
 where
     I2C: Write<Error = E> + WriteRead<Error = E>,
 {
@@ -135,7 +137,7 @@ where
     ///
     /// # }
     /// ```
-    pub fn new(i2c: I2C, address: u8) -> Self {
+    pub fn new(i2c: &'a RefCell<I2C>, address: u8) -> Self {
         // Configure the initial values to match the power-on defaults.
         HT16K33 {
             address,
@@ -197,7 +199,7 @@ where
     ///
     /// # }
     /// ```
-    pub fn destroy(self) -> I2C {
+    pub fn destroy(self) -> &'a RefCell<I2C> {
         // TODO Improve the naming? And somehow mark the state as destroyed so that
         // all other I2C accesses fail nicely? Should we continue to allow non-I2C access?
         self.i2c
@@ -376,7 +378,7 @@ where
     pub fn set_oscillator(&mut self, oscillator: Oscillator) -> Result<(), E> {
         self.oscillator_state = oscillator;
 
-        self.i2c.write(
+        self.i2c.borrow_mut().write(
             self.address,
             &[(Oscillator::COMMAND | self.oscillator_state).bits()],
         )?;
@@ -410,7 +412,7 @@ where
     pub fn set_display(&mut self, display: Display) -> Result<(), E> {
         self.display_state = display;
 
-        self.i2c.write(
+        self.i2c.borrow_mut().write(
             self.address,
             &[(Display::COMMAND | self.display_state).bits()],
         )?;
@@ -444,7 +446,7 @@ where
     pub fn set_dimming(&mut self, dimming: Dimming) -> Result<(), E> {
         self.dimming_state = dimming;
 
-        self.i2c.write(
+        self.i2c.borrow_mut().write(
             self.address,
             &[(Dimming::COMMAND | self.dimming_state).bits()],
         )?;
@@ -482,7 +484,7 @@ where
         // TODO Validate `address` parameter.
         self.update_display_buffer(location, enabled);
 
-        self.i2c.write(
+        self.i2c.borrow_mut().write(
             self.address,
             &[
                 location.row.bits(),
@@ -519,7 +521,7 @@ where
             write_buffer[value + 1] = self.buffer[value].bits();
         }
 
-        self.i2c.write(self.address, &write_buffer)?;
+        self.i2c.borrow_mut().write(self.address, &write_buffer)?;
 
         Ok(())
     }
@@ -545,7 +547,7 @@ where
     pub fn read_display_buffer(&mut self) -> Result<(), E> {
         let mut read_buffer = [0u8; ROWS_SIZE];
 
-        self.i2c.write_read(
+        self.i2c.borrow_mut().write_read(
             self.address,
             &[DisplayDataAddress::ROW_0.bits()],
             &mut read_buffer,
@@ -567,6 +569,7 @@ mod tests {
     use self::hal::i2c::{Mock as I2cMock, Transaction as I2cTransaction};
     use super::*;
 
+    use core::cell::RefCell;
     use std::vec;
 
     const ADDRESS: u8 = 0;
@@ -575,10 +578,10 @@ mod tests {
     fn new() {
         let expectations = [];
 
-        let mut i2c = I2cMock::new(&expectations);
-        let ht16k33 = HT16K33::new(i2c, ADDRESS);
+        let i2c = RefCell::new(I2cMock::new(&expectations));
+        let _ht16k33 = HT16K33::new(&i2c, ADDRESS);
 
-        i2c = ht16k33.destroy();
+        let mut i2c = i2c.into_inner();
         i2c.done();
     }
 
@@ -603,12 +606,12 @@ mod tests {
             I2cTransaction::write(ADDRESS, write_buffer),
         ];
 
-        let mut i2c = I2cMock::new(&expectations);
-        let mut ht16k33 = HT16K33::new(i2c, ADDRESS);
+        let i2c = RefCell::new(I2cMock::new(&expectations));
+        let mut ht16k33 = HT16K33::new(&i2c, ADDRESS);
 
         ht16k33.initialize().unwrap();
 
-        i2c = ht16k33.destroy();
+        let mut i2c = i2c.into_inner();
         i2c.done();
     }
 
@@ -616,8 +619,8 @@ mod tests {
     fn display_buffer() {
         let expectations = [];
 
-        let mut i2c = I2cMock::new(&expectations);
-        let ht16k33 = HT16K33::new(i2c, ADDRESS);
+        let i2c = RefCell::new(I2cMock::new(&expectations));
+        let ht16k33 = HT16K33::new(&i2c, ADDRESS);
 
         let &buffer = ht16k33.display_buffer();
 
@@ -629,7 +632,7 @@ mod tests {
             assert_eq!(row.bits(), 0u8);
         }
 
-        i2c = ht16k33.destroy();
+        let mut i2c = i2c.into_inner();
         i2c.done();
     }
 
@@ -637,14 +640,14 @@ mod tests {
     fn oscillator() {
         let expectations = [];
 
-        let mut i2c = I2cMock::new(&expectations);
-        let ht16k33 = HT16K33::new(i2c, ADDRESS);
+        let i2c = RefCell::new(I2cMock::new(&expectations));
+        let ht16k33 = HT16K33::new(&i2c, ADDRESS);
 
         let &oscillator = ht16k33.oscillator();
 
         assert_eq!(oscillator, Oscillator::OFF);
 
-        i2c = ht16k33.destroy();
+        let mut i2c = i2c.into_inner();
         i2c.done();
     }
 
@@ -652,14 +655,14 @@ mod tests {
     fn display() {
         let expectations = [];
 
-        let mut i2c = I2cMock::new(&expectations);
-        let ht16k33 = HT16K33::new(i2c, ADDRESS);
+        let i2c = RefCell::new(I2cMock::new(&expectations));
+        let ht16k33 = HT16K33::new(&i2c, ADDRESS);
 
         let &display = ht16k33.display();
 
         assert_eq!(display, Display::OFF);
 
-        i2c = ht16k33.destroy();
+        let mut i2c = i2c.into_inner();
         i2c.done();
     }
 
@@ -667,14 +670,14 @@ mod tests {
     fn dimming() {
         let expectations = [];
 
-        let mut i2c = I2cMock::new(&expectations);
-        let ht16k33 = HT16K33::new(i2c, ADDRESS);
+        let i2c = RefCell::new(I2cMock::new(&expectations));
+        let ht16k33 = HT16K33::new(&i2c, ADDRESS);
 
         let &dimming = ht16k33.dimming();
 
         assert_eq!(dimming, Dimming::BRIGHTNESS_MAX);
 
-        i2c = ht16k33.destroy();
+        let mut i2c = i2c.into_inner();
         i2c.done();
     }
 
@@ -682,8 +685,8 @@ mod tests {
     fn update_display_buffer() {
         let expectations = [];
 
-        let mut i2c = I2cMock::new(&expectations);
-        let mut ht16k33 = HT16K33::new(i2c, ADDRESS);
+        let i2c = RefCell::new(I2cMock::new(&expectations));
+        let mut ht16k33 = HT16K33::new(&i2c, ADDRESS);
 
         let first_led = LedLocation::new(1, 4).unwrap();
         let second_led = LedLocation::new(1, 5).unwrap();
@@ -700,7 +703,7 @@ mod tests {
         ht16k33.update_display_buffer(first_led, false);
         assert_eq!(ht16k33.display_buffer()[1].bits(), 0b0010_0000);
 
-        i2c = ht16k33.destroy();
+        let mut i2c = i2c.into_inner();
         i2c.done();
     }
 
@@ -708,8 +711,8 @@ mod tests {
     fn clear_display_buffer() {
         let expectations = [];
 
-        let mut i2c = I2cMock::new(&expectations);
-        let mut ht16k33 = HT16K33::new(i2c, ADDRESS);
+        let i2c = RefCell::new(I2cMock::new(&expectations));
+        let mut ht16k33 = HT16K33::new(&i2c, ADDRESS);
 
         let first_led = LedLocation::new(1, 4).unwrap();
         let second_led = LedLocation::new(1, 5).unwrap();
@@ -731,7 +734,7 @@ mod tests {
             assert_eq!(row.bits(), 0u8);
         }
 
-        i2c = ht16k33.destroy();
+        let mut i2c = i2c.into_inner();
         i2c.done();
     }
 
@@ -742,12 +745,12 @@ mod tests {
             vec![(super::Oscillator::COMMAND | super::Oscillator::OFF).bits()],
         )];
 
-        let mut i2c = I2cMock::new(&expectations);
-        let mut ht16k33 = HT16K33::new(i2c, ADDRESS);
+        let i2c = RefCell::new(I2cMock::new(&expectations));
+        let mut ht16k33 = HT16K33::new(&i2c, ADDRESS);
 
         ht16k33.set_oscillator(super::Oscillator::OFF).unwrap();
 
-        i2c = ht16k33.destroy();
+        let mut i2c = i2c.into_inner();
         i2c.done();
     }
 
@@ -758,12 +761,12 @@ mod tests {
             vec![(super::Display::COMMAND | super::Display::OFF).bits()],
         )];
 
-        let mut i2c = I2cMock::new(&expectations);
-        let mut ht16k33 = HT16K33::new(i2c, ADDRESS);
+        let i2c = RefCell::new(I2cMock::new(&expectations));
+        let mut ht16k33 = HT16K33::new(&i2c, ADDRESS);
 
         ht16k33.set_display(super::Display::OFF).unwrap();
 
-        i2c = ht16k33.destroy();
+        let mut i2c = i2c.into_inner();
         i2c.done();
     }
 
@@ -774,12 +777,12 @@ mod tests {
             vec![(super::Dimming::COMMAND | Dimming::BRIGHTNESS_MAX).bits()],
         )];
 
-        let mut i2c = I2cMock::new(&expectations);
-        let mut ht16k33 = HT16K33::new(i2c, ADDRESS);
+        let i2c = RefCell::new(I2cMock::new(&expectations));
+        let mut ht16k33 = HT16K33::new(&i2c, ADDRESS);
 
         ht16k33.set_dimming(Dimming::BRIGHTNESS_MAX).unwrap();
 
-        i2c = ht16k33.destroy();
+        let mut i2c = i2c.into_inner();
         i2c.done();
     }
 
@@ -787,14 +790,14 @@ mod tests {
     fn set_led() {
         let expectations = [I2cTransaction::write(ADDRESS, vec![1u8, 0b1000_0000])];
 
-        let mut i2c = I2cMock::new(&expectations);
-        let mut ht16k33 = HT16K33::new(i2c, ADDRESS);
+        let i2c = RefCell::new(I2cMock::new(&expectations));
+        let mut ht16k33 = HT16K33::new(&i2c, ADDRESS);
 
         ht16k33
             .set_led(LedLocation::new(1, 7).unwrap(), true)
             .unwrap();
 
-        i2c = ht16k33.destroy();
+        let mut i2c = i2c.into_inner();
         i2c.done();
     }
 
@@ -805,12 +808,12 @@ mod tests {
 
         let expectations = [I2cTransaction::write(ADDRESS, write_buffer)];
 
-        let mut i2c = I2cMock::new(&expectations);
-        let mut ht16k33 = HT16K33::new(i2c, ADDRESS);
+        let i2c = RefCell::new(I2cMock::new(&expectations));
+        let mut ht16k33 = HT16K33::new(&i2c, ADDRESS);
 
         ht16k33.write_display_buffer().unwrap();
 
-        i2c = ht16k33.destroy();
+        let mut i2c = i2c.into_inner();
         i2c.done();
     }
 
@@ -826,8 +829,8 @@ mod tests {
             read_buffer,
         )];
 
-        let mut i2c = I2cMock::new(&expectations);
-        let mut ht16k33 = HT16K33::new(i2c, ADDRESS);
+        let i2c = RefCell::new(I2cMock::new(&expectations));
+        let mut ht16k33 = HT16K33::new(&i2c, ADDRESS);
 
         ht16k33.read_display_buffer().unwrap();
 
@@ -840,7 +843,7 @@ mod tests {
             }
         }
 
-        i2c = ht16k33.destroy();
+        let mut i2c = i2c.into_inner();
         i2c.done();
     }
 }
