@@ -53,7 +53,7 @@ mod tests {
     #[test]
     fn default() {
         assert_eq!(
-            DisplayDataAddress::ROW_0,
+            DisplayDataAddress::COMMON_0,
             DisplayDataAddress::default(),
             "DisplayDataAddress default is row 0"
         );

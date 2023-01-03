@@ -53,7 +53,7 @@ impl fmt::Display for DisplayData {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             DisplayData::ROW_NONE => write!(f, "DisplayData::ROW_NONE"),
-            DisplayData::ROW_0 => write!(f, "DisplayData::ROW_0"),
+            DisplayData::ROW_0 => write!(f, "DisplayData::COMMON_0"),
             DisplayData::ROW_1 => write!(f, "DisplayData::ROW_1"),
             DisplayData::ROW_2 => write!(f, "DisplayData::ROW_2"),
             DisplayData::ROW_3 => write!(f, "DisplayData::ROW_3"),
@@ -81,7 +81,7 @@ mod tests {
     #[test]
     fn default() {
         assert_eq!(
-            DisplayData::COMMON_NONE,
+            DisplayData::ROW_NONE,
             DisplayData::default(),
             "DisplayData default COMMON_NONE"
         );
@@ -89,14 +89,22 @@ mod tests {
 
     #[test]
     fn all_on() {
-        let data = DisplayData::COMMON_0
-            | DisplayData::COMMON_1
-            | DisplayData::COMMON_2
-            | DisplayData::COMMON_3
-            | DisplayData::COMMON_4
-            | DisplayData::COMMON_5
-            | DisplayData::COMMON_6
-            | DisplayData::COMMON_7;
+        let data = DisplayData::ROW_0
+            | DisplayData::ROW_1
+            | DisplayData::ROW_2
+            | DisplayData::ROW_3
+            | DisplayData::ROW_4
+            | DisplayData::ROW_5
+            | DisplayData::ROW_6
+            | DisplayData::ROW_7
+            | DisplayData::ROW_8
+            | DisplayData::ROW_9
+            | DisplayData::ROW_10
+            | DisplayData::ROW_11
+            | DisplayData::ROW_12
+            | DisplayData::ROW_13
+            | DisplayData::ROW_14
+            | DisplayData::ROW_15;
 
         assert_eq!(data, DisplayData::all(), "DisplayData is all enabled");
     }

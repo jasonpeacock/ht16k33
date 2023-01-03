@@ -601,7 +601,7 @@ mod tests {
 
     #[test]
     fn initialize() {
-        let mut write_buffer = vec![super::DisplayDataAddress::ROW_0.bits()];
+        let mut write_buffer = vec![super::DisplayDataAddress::COMMON_0.bits()];
         write_buffer.extend([0; super::ROWS_SIZE].iter().cloned());
 
         let expectations = [
@@ -643,7 +643,7 @@ mod tests {
 
         for row in buffer.iter() {
             // And because we just initialized this buffer, it should be all zeros.
-            assert_eq!(row.bits(), 0u8);
+            assert_eq!(row.bits(), 0u16);
         }
 
         i2c = ht16k33.destroy();
@@ -707,15 +707,18 @@ mod tests {
 
         // Turn on the LED.
         ht16k33.update_display_buffer(first_led, true);
-        assert_eq!(ht16k33.display_buffer()[1].bits(), 0b0001_0000);
+        assert_eq!(ht16k33.display_buffer()[4].bits(), 0b0000_0000_0000_0010);
+        assert_eq!(ht16k33.display_buffer()[5].bits(), 0b0000_0000_0000_0000);
 
         // Turn on another LED.
         ht16k33.update_display_buffer(second_led, true);
-        assert_eq!(ht16k33.display_buffer()[1].bits(), 0b0011_0000);
+        assert_eq!(ht16k33.display_buffer()[4].bits(), 0b0000_0000_0000_0010);
+        assert_eq!(ht16k33.display_buffer()[5].bits(), 0b0000_0000_0000_0010);
 
         // Turn off the first LED.
         ht16k33.update_display_buffer(first_led, false);
-        assert_eq!(ht16k33.display_buffer()[1].bits(), 0b0010_0000);
+        assert_eq!(ht16k33.display_buffer()[4].bits(), 0b0000_0000_0000_0000);
+        assert_eq!(ht16k33.display_buffer()[5].bits(), 0b0000_0000_0000_0010);
 
         i2c = ht16k33.destroy();
         i2c.done();
@@ -745,7 +748,7 @@ mod tests {
 
         for row in buffer.iter() {
             // We just cleared this buffer, it should be all zeros.
-            assert_eq!(row.bits(), 0u8);
+            assert_eq!(row.bits(), 0u16);
         }
 
         i2c = ht16k33.destroy();
@@ -801,8 +804,8 @@ mod tests {
     }
 
     #[test]
-    fn set_led() {
-        let expectations = [I2cTransaction::write(ADDRESS, vec![1u8, 0b1000_0000])];
+    fn set_led_lo() {
+        let expectations = [I2cTransaction::write(ADDRESS, vec![14u8, 0b0000_0010])];
 
         let mut i2c = I2cMock::new(&expectations);
         let mut ht16k33 = HT16K33::new(i2c, ADDRESS);
@@ -816,8 +819,23 @@ mod tests {
     }
 
     #[test]
+    fn set_led_hi() {
+        let expectations = [I2cTransaction::write(ADDRESS, vec![15u8, 0b0000_0010])];
+
+        let mut i2c = I2cMock::new(&expectations);
+        let mut ht16k33 = HT16K33::new(i2c, ADDRESS);
+
+        ht16k33
+            .set_led(LedLocation::new(9, 7).unwrap(), true)
+            .unwrap();
+
+        i2c = ht16k33.destroy();
+        i2c.done();
+    }
+
+    #[test]
     fn write_display_buffer() {
-        let mut write_buffer = vec![super::DisplayDataAddress::ROW_0.bits()];
+        let mut write_buffer = vec![super::DisplayDataAddress::COMMON_0.bits()];
         write_buffer.extend([0; super::ROWS_SIZE].iter().cloned());
 
         let expectations = [I2cTransaction::write(ADDRESS, write_buffer)];
@@ -839,7 +857,7 @@ mod tests {
 
         let expectations = [I2cTransaction::write_read(
             ADDRESS,
-            vec![super::DisplayDataAddress::ROW_0.bits()],
+            vec![super::DisplayDataAddress::COMMON_0.bits()],
             read_buffer,
         )];
 
@@ -852,7 +870,8 @@ mod tests {
 
         for value in 0..buffer.len() {
             match value {
-                1 | 15 => assert_eq!(buffer[value].bits(), 0b0000_0010),
+                0 => assert_eq!(buffer[value].bits(), 0b0000_0010_0000_0000),
+                7 => assert_eq!(buffer[value].bits(), 0b0000_0010_0000_0000),
                 _ => assert_eq!(buffer[value].bits(), 0),
             }
         }

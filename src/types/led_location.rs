@@ -24,8 +24,8 @@ use core::fmt;
 ///
 /// let location = LedLocation::new(row, common)?;
 ///
-/// assert_eq!(ht16k33::DisplayDataAddress::ROW_1, location.row);
-/// assert_eq!(ht16k33::DisplayData::COMMON_2, location.common);
+/// assert_eq!(ht16k33::DisplayDataAddress::COMMON_2, location.common());
+/// assert_eq!(ht16k33::DisplayData::ROW_1, location.row());
 ///
 /// # Ok(())
 /// # }
@@ -102,7 +102,17 @@ impl LedLocation {
         Ok(LedLocation { row, common })
     }
 
-    /// Return the `common` value.
+    /// Return the Display RAM `row` address.
+    pub fn row(self) -> DisplayData {
+        self.row
+    }
+
+    /// Return the Display RAM `common` address.
+    pub fn common(self) -> DisplayDataAddress {
+        self.common
+    }
+
+    /// Return the `common` as an index into the display buffer.
     pub fn common_as_index(self) -> usize {
         self.common.bits() as usize
     }
@@ -133,8 +143,8 @@ mod tests {
         let location = LedLocation::default();
 
         assert!(
-            DisplayDataAddress::ROW_0 == location.row
-                && DisplayData::COMMON_NONE == location.common,
+            DisplayDataAddress::COMMON_0 == location.common
+                && DisplayData::ROW_NONE == location.row,
             "LedLocation default is (0, None)"
         );
     }
@@ -144,14 +154,14 @@ mod tests {
         let location = LedLocation::new(0, 0).unwrap();
 
         assert!(
-            DisplayDataAddress::ROW_0 == location.row && DisplayData::COMMON_0 == location.common,
+            DisplayDataAddress::COMMON_0 == location.common && DisplayData::ROW_0 == location.row,
             "LedLocation is (0, 0)"
         );
 
         let location = LedLocation::new(15, 7).unwrap();
 
         assert!(
-            DisplayDataAddress::ROW_15 == location.row && DisplayData::COMMON_7 == location.common,
+            DisplayDataAddress::COMMON_7 == location.common && DisplayData::ROW_15 == location.row,
             "LedLocation is (15, 7)"
         );
     }
@@ -169,8 +179,8 @@ mod tests {
     }
 
     #[test]
-    fn row_as_index() {
+    fn common_as_index() {
         let location = LedLocation::new(2, 2).unwrap();
-        assert_eq!(2usize, location.row_as_index());
+        assert_eq!(2usize, location.common_as_index());
     }
 }
