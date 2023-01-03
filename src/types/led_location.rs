@@ -37,9 +37,9 @@ use core::fmt;
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct LedLocation {
     /// The Display RAM `row` address.
-    pub row: DisplayDataAddress,
-    /// The Display RAM `common` data.
-    pub common: DisplayData,
+    pub(crate) row: DisplayData,
+    /// The Display RAM `common` address.
+    pub(crate) common: DisplayDataAddress,
 }
 
 impl fmt::Display for LedLocation {
@@ -96,15 +96,31 @@ impl LedLocation {
             });
         }
 
-        let row = DisplayDataAddress::from_bits_truncate(row);
-        let common = DisplayData::from_bits_truncate(1 << common);
+        let row = DisplayData::from_bits_truncate(1 << row);
+        let common = DisplayDataAddress::from_bits_truncate(common);
 
         Ok(LedLocation { row, common })
     }
 
-    /// Return the `row` value.
-    pub fn row_as_index(self) -> usize {
-        self.row.bits() as usize
+    /// Return the `common` value.
+    pub fn common_as_index(self) -> usize {
+        self.common.bits() as usize
+    }
+
+    /// Convenience function to map between `DisplayData` indices and indices
+    /// used on an HT16K33.
+    pub(crate) fn common_as_index_on_chip(self) -> u8 {
+        let chip_index = self.common.bits() * 2;
+
+        // Invariant: An LedLocation only ever has one bit set for
+        // DisplayData.
+        let offs = if self.row >= DisplayData::ROW_8 {
+            1
+        } else {
+            0
+        };
+
+        chip_index + offs
     }
 }
 

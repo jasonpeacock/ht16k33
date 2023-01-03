@@ -81,7 +81,7 @@ impl hal::blocking::i2c::WriteRead for I2cMock {
     ) -> Result<(), Self::Error> {
         // The `bytes` have the `data_address` command + index to start reading from,
         // need to clear the command to extract the starting index.
-        let mut data_offset = (bytes[0] ^ DisplayDataAddress::ROW_0.bits()) as usize;
+        let mut data_offset = (bytes[0] ^ DisplayDataAddress::COMMON_0.bits()) as usize;
 
         for value in buffer.iter_mut() {
             *value = self.data_values[data_offset];
@@ -128,7 +128,7 @@ impl hal::blocking::i2c::Write for I2cMock {
         }
 
         // Other writes have data, store them.
-        let mut data_offset = (bytes[0] ^ DisplayDataAddress::ROW_0.bits()) as usize;
+        let mut data_offset = (bytes[0] ^ DisplayDataAddress::COMMON_0.bits()) as usize;
         let data = &bytes[1..];
 
         for value in data.iter() {

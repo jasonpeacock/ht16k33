@@ -320,7 +320,7 @@ where
         // TODO Validate `address` parameter.
 
         // Turn on/off the specified LED.
-        self.buffer[location.row_as_index()].set(location.common, enabled);
+        self.buffer[location.common_as_index()].set(location.row, enabled);
     }
 
     /// Clear contents of the display buffer.
@@ -344,9 +344,9 @@ where
     /// ```
     pub fn clear_display_buffer(&mut self) {
         // TODO is there any advantage to iteration vs just assigning
-        // a new, empty `[0; ROWS_SIZE]` array?
+        // a new, empty `[0; COMMON_SIZE]` array?
         for row in self.buffer.iter_mut() {
-            *row = DisplayData::COMMON_NONE;
+            *row = DisplayData::ROW_NONE;
         }
     }
 
@@ -482,11 +482,20 @@ where
         // TODO Validate `address` parameter.
         self.update_display_buffer(location, enabled);
 
+        let buf_addr = location.common_as_index();
+        let chip_addr = location.common_as_index_on_chip();
+
+        let new_mask = if chip_addr % 2 != 0 {
+            u16::to_le_bytes(self.buffer[buf_addr].bits())[1]
+        } else {
+            u16::to_le_bytes(self.buffer[buf_addr].bits())[0]
+        };
+
         self.i2c.write(
             self.address,
             &[
-                location.row.bits(),
-                self.buffer[location.row_as_index()].bits(),
+                chip_addr,
+                new_mask
             ],
         )?;
 
@@ -513,10 +522,12 @@ where
     /// ```
     pub fn write_display_buffer(&mut self) -> Result<(), E> {
         let mut write_buffer = [0u8; ROWS_SIZE + 1];
-        write_buffer[0] = DisplayDataAddress::ROW_0.bits();
+        write_buffer[0] = DisplayDataAddress::COMMON_0.bits();
 
-        for value in 0usize..self.buffer.len() {
-            write_buffer[value + 1] = self.buffer[value].bits();
+        for (write_idx, ddata) in Iterator::zip((1..17).step_by(2), self.buffer) {
+            let bytes = u16::to_le_bytes(ddata.bits());
+            write_buffer[write_idx] = bytes[0];
+            write_buffer[write_idx + 1] = bytes[1];
         }
 
         self.i2c.write(self.address, &write_buffer)?;
@@ -547,12 +558,18 @@ where
 
         self.i2c.write_read(
             self.address,
-            &[DisplayDataAddress::ROW_0.bits()],
+            &[DisplayDataAddress::COMMON_0.bits()],
             &mut read_buffer,
         )?;
 
+        let mut bytes = [0; 2];
         for (index, value) in read_buffer.iter().enumerate() {
-            self.buffer[index] = DisplayData::from_bits_truncate(*value);
+            if index % 2 != 0 {
+                bytes[1] = *value;
+                self.buffer[index/2] = DisplayData::from_bits_truncate(u16::from_le_bytes(bytes));
+            } else {
+                bytes[0] = *value;
+            }
         }
 
         Ok(())
