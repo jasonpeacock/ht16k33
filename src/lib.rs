@@ -320,7 +320,7 @@ where
         // TODO Validate `address` parameter.
 
         // Turn on/off the specified LED.
-        self.buffer[location.row_as_index()].set(location.common, enabled);
+        self.buffer[location.common_as_index()].set(location.row, enabled);
     }
 
     /// Clear contents of the display buffer.
@@ -344,9 +344,9 @@ where
     /// ```
     pub fn clear_display_buffer(&mut self) {
         // TODO is there any advantage to iteration vs just assigning
-        // a new, empty `[0; ROWS_SIZE]` array?
+        // a new, empty `[0; COMMON_SIZE]` array?
         for row in self.buffer.iter_mut() {
-            *row = DisplayData::COMMON_NONE;
+            *row = DisplayData::ROW_NONE;
         }
     }
 
@@ -482,11 +482,20 @@ where
         // TODO Validate `address` parameter.
         self.update_display_buffer(location, enabled);
 
+        let buf_addr = location.common_as_index();
+        let chip_addr = location.common_as_index_on_chip();
+
+        let new_mask = if chip_addr % 2 != 0 {
+            u16::to_le_bytes(self.buffer[buf_addr].bits())[1]
+        } else {
+            u16::to_le_bytes(self.buffer[buf_addr].bits())[0]
+        };
+
         self.i2c.write(
             self.address,
             &[
-                location.row.bits(),
-                self.buffer[location.row_as_index()].bits(),
+                chip_addr,
+                new_mask
             ],
         )?;
 
@@ -513,10 +522,12 @@ where
     /// ```
     pub fn write_display_buffer(&mut self) -> Result<(), E> {
         let mut write_buffer = [0u8; ROWS_SIZE + 1];
-        write_buffer[0] = DisplayDataAddress::ROW_0.bits();
+        write_buffer[0] = DisplayDataAddress::COMMON_0.bits();
 
-        for value in 0usize..self.buffer.len() {
-            write_buffer[value + 1] = self.buffer[value].bits();
+        for (write_idx, ddata) in Iterator::zip((1..17).step_by(2), self.buffer) {
+            let bytes = u16::to_le_bytes(ddata.bits());
+            write_buffer[write_idx] = bytes[0];
+            write_buffer[write_idx + 1] = bytes[1];
         }
 
         self.i2c.write(self.address, &write_buffer)?;
@@ -547,12 +558,18 @@ where
 
         self.i2c.write_read(
             self.address,
-            &[DisplayDataAddress::ROW_0.bits()],
+            &[DisplayDataAddress::COMMON_0.bits()],
             &mut read_buffer,
         )?;
 
+        let mut bytes = [0; 2];
         for (index, value) in read_buffer.iter().enumerate() {
-            self.buffer[index] = DisplayData::from_bits_truncate(*value);
+            if index % 2 != 0 {
+                bytes[1] = *value;
+                self.buffer[index/2] = DisplayData::from_bits_truncate(u16::from_le_bytes(bytes));
+            } else {
+                bytes[0] = *value;
+            }
         }
 
         Ok(())
@@ -584,7 +601,7 @@ mod tests {
 
     #[test]
     fn initialize() {
-        let mut write_buffer = vec![super::DisplayDataAddress::ROW_0.bits()];
+        let mut write_buffer = vec![super::DisplayDataAddress::COMMON_0.bits()];
         write_buffer.extend([0; super::ROWS_SIZE].iter().cloned());
 
         let expectations = [
@@ -626,7 +643,7 @@ mod tests {
 
         for row in buffer.iter() {
             // And because we just initialized this buffer, it should be all zeros.
-            assert_eq!(row.bits(), 0u8);
+            assert_eq!(row.bits(), 0u16);
         }
 
         i2c = ht16k33.destroy();
@@ -690,15 +707,18 @@ mod tests {
 
         // Turn on the LED.
         ht16k33.update_display_buffer(first_led, true);
-        assert_eq!(ht16k33.display_buffer()[1].bits(), 0b0001_0000);
+        assert_eq!(ht16k33.display_buffer()[4].bits(), 0b0000_0000_0000_0010);
+        assert_eq!(ht16k33.display_buffer()[5].bits(), 0b0000_0000_0000_0000);
 
         // Turn on another LED.
         ht16k33.update_display_buffer(second_led, true);
-        assert_eq!(ht16k33.display_buffer()[1].bits(), 0b0011_0000);
+        assert_eq!(ht16k33.display_buffer()[4].bits(), 0b0000_0000_0000_0010);
+        assert_eq!(ht16k33.display_buffer()[5].bits(), 0b0000_0000_0000_0010);
 
         // Turn off the first LED.
         ht16k33.update_display_buffer(first_led, false);
-        assert_eq!(ht16k33.display_buffer()[1].bits(), 0b0010_0000);
+        assert_eq!(ht16k33.display_buffer()[4].bits(), 0b0000_0000_0000_0000);
+        assert_eq!(ht16k33.display_buffer()[5].bits(), 0b0000_0000_0000_0010);
 
         i2c = ht16k33.destroy();
         i2c.done();
@@ -728,7 +748,7 @@ mod tests {
 
         for row in buffer.iter() {
             // We just cleared this buffer, it should be all zeros.
-            assert_eq!(row.bits(), 0u8);
+            assert_eq!(row.bits(), 0u16);
         }
 
         i2c = ht16k33.destroy();
@@ -784,8 +804,8 @@ mod tests {
     }
 
     #[test]
-    fn set_led() {
-        let expectations = [I2cTransaction::write(ADDRESS, vec![1u8, 0b1000_0000])];
+    fn set_led_lo() {
+        let expectations = [I2cTransaction::write(ADDRESS, vec![14u8, 0b0000_0010])];
 
         let mut i2c = I2cMock::new(&expectations);
         let mut ht16k33 = HT16K33::new(i2c, ADDRESS);
@@ -799,8 +819,23 @@ mod tests {
     }
 
     #[test]
+    fn set_led_hi() {
+        let expectations = [I2cTransaction::write(ADDRESS, vec![15u8, 0b0000_0010])];
+
+        let mut i2c = I2cMock::new(&expectations);
+        let mut ht16k33 = HT16K33::new(i2c, ADDRESS);
+
+        ht16k33
+            .set_led(LedLocation::new(9, 7).unwrap(), true)
+            .unwrap();
+
+        i2c = ht16k33.destroy();
+        i2c.done();
+    }
+
+    #[test]
     fn write_display_buffer() {
-        let mut write_buffer = vec![super::DisplayDataAddress::ROW_0.bits()];
+        let mut write_buffer = vec![super::DisplayDataAddress::COMMON_0.bits()];
         write_buffer.extend([0; super::ROWS_SIZE].iter().cloned());
 
         let expectations = [I2cTransaction::write(ADDRESS, write_buffer)];
@@ -822,7 +857,7 @@ mod tests {
 
         let expectations = [I2cTransaction::write_read(
             ADDRESS,
-            vec![super::DisplayDataAddress::ROW_0.bits()],
+            vec![super::DisplayDataAddress::COMMON_0.bits()],
             read_buffer,
         )];
 
@@ -835,7 +870,8 @@ mod tests {
 
         for value in 0..buffer.len() {
             match value {
-                1 | 15 => assert_eq!(buffer[value].bits(), 0b0000_0010),
+                0 => assert_eq!(buffer[value].bits(), 0b0000_0010_0000_0000),
+                7 => assert_eq!(buffer[value].bits(), 0b0000_0010_0000_0000),
                 _ => assert_eq!(buffer[value].bits(), 0),
             }
         }

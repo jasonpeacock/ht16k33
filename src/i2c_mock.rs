@@ -69,7 +69,7 @@ impl hal::blocking::i2c::WriteRead for I2cMock {
     /// let mut i2c_mock = I2cMock::new();
     ///
     /// let mut read_buffer = [0u8; 16];
-    /// i2c_mock.write_read(0, &[ht16k33::DisplayDataAddress::ROW_0.bits()], &mut read_buffer);
+    /// i2c_mock.write_read(0, &[ht16k33::DisplayDataAddress::COMMON_0.bits()], &mut read_buffer);
     ///
     /// # }
     /// ```
@@ -81,7 +81,7 @@ impl hal::blocking::i2c::WriteRead for I2cMock {
     ) -> Result<(), Self::Error> {
         // The `bytes` have the `data_address` command + index to start reading from,
         // need to clear the command to extract the starting index.
-        let mut data_offset = (bytes[0] ^ DisplayDataAddress::ROW_0.bits()) as usize;
+        let mut data_offset = (bytes[0] ^ DisplayDataAddress::COMMON_0.bits()) as usize;
 
         for value in buffer.iter_mut() {
             *value = self.data_values[data_offset];
@@ -114,7 +114,7 @@ impl hal::blocking::i2c::Write for I2cMock {
     ///
     /// // First value is the data address, remaining values are to be written
     /// // starting at the data address which auto-increments and then wraps.
-    /// let write_buffer = [ht16k33::DisplayDataAddress::ROW_0.bits(), 0u8, 0u8];
+    /// let write_buffer = [ht16k33::DisplayDataAddress::COMMON_0.bits(), 0u8, 0u8];
     ///
     /// i2c_mock.write(0, &write_buffer);
     ///
@@ -128,7 +128,7 @@ impl hal::blocking::i2c::Write for I2cMock {
         }
 
         // Other writes have data, store them.
-        let mut data_offset = (bytes[0] ^ DisplayDataAddress::ROW_0.bits()) as usize;
+        let mut data_offset = (bytes[0] ^ DisplayDataAddress::COMMON_0.bits()) as usize;
         let data = &bytes[1..];
 
         for value in data.iter() {
@@ -158,7 +158,7 @@ mod tests {
     fn write() {
         let mut i2c_mock = I2cMock::new();
 
-        let write_buffer = [super::DisplayDataAddress::ROW_0.bits(), 1u8, 1u8];
+        let write_buffer = [super::DisplayDataAddress::COMMON_0.bits(), 1u8, 1u8];
         i2c_mock.write(ADDRESS, &write_buffer).unwrap();
 
         for value in 0..i2c_mock.data_values.len() {
@@ -182,7 +182,7 @@ mod tests {
         let mut i2c_mock = I2cMock::new();
 
         let offset = 4u8;
-        let write_buffer = [super::DisplayDataAddress::ROW_0.bits() | offset, 1u8, 1u8];
+        let write_buffer = [super::DisplayDataAddress::COMMON_0.bits() | offset, 1u8, 1u8];
         i2c_mock.write(ADDRESS, &write_buffer).unwrap();
 
         for value in 0..i2c_mock.data_values.len() {
@@ -207,7 +207,7 @@ mod tests {
 
         // Match the data values size, +2 to wrap around, +1 for the data command.
         let mut write_buffer = [1u8; super::ROWS_SIZE + 3];
-        write_buffer[0] = super::DisplayDataAddress::ROW_0.bits();
+        write_buffer[0] = super::DisplayDataAddress::COMMON_0.bits();
 
         // These values should wrap and end up at indexes 0 & 1.
         write_buffer[write_buffer.len() - 1] = 2;
@@ -239,7 +239,7 @@ mod tests {
         let mut write_buffer = [1u8; super::ROWS_SIZE + 3];
 
         let offset = 4u8;
-        write_buffer[0] = super::DisplayDataAddress::ROW_0.bits() | offset;
+        write_buffer[0] = super::DisplayDataAddress::COMMON_0.bits() | offset;
 
         // These values should wrap and end up at indexes 4 & 5.
         write_buffer[write_buffer.len() - 1] = 2;
@@ -274,7 +274,7 @@ mod tests {
         i2c_mock
             .write_read(
                 ADDRESS,
-                &[super::DisplayDataAddress::ROW_0.bits()],
+                &[super::DisplayDataAddress::COMMON_0.bits()],
                 &mut read_buffer,
             )
             .unwrap();
@@ -308,7 +308,7 @@ mod tests {
         i2c_mock
             .write_read(
                 ADDRESS,
-                &[super::DisplayDataAddress::ROW_0.bits() | offset],
+                &[super::DisplayDataAddress::COMMON_0.bits() | offset],
                 &mut read_buffer,
             )
             .unwrap();
@@ -341,7 +341,7 @@ mod tests {
         i2c_mock
             .write_read(
                 ADDRESS,
-                &[super::DisplayDataAddress::ROW_0.bits()],
+                &[super::DisplayDataAddress::COMMON_0.bits()],
                 &mut read_buffer,
             )
             .unwrap();
@@ -375,7 +375,7 @@ mod tests {
         i2c_mock
             .write_read(
                 ADDRESS,
-                &[super::DisplayDataAddress::ROW_0.bits() | offset],
+                &[super::DisplayDataAddress::COMMON_0.bits() | offset],
                 &mut read_buffer,
             )
             .unwrap();

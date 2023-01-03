@@ -1,7 +1,7 @@
 [package]
 edition = "2018"
 name = "ht16k33"
-version = "0.4.0"
+version = "0.5.0"
 authors = ["Jason Peacock <jason@jasonpeacock.com>"]
 description = "Rust driver for the Holtek HT16K33 'RAM Mapping 16*8 LED Controller Driver with keyscan'"
 keywords = ["no-std", "led", "driver", "display", "embedded-hal"]
