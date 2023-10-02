@@ -203,153 +203,6 @@ where
         self.i2c
     }
 
-    /// Return the current display buffer.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use failure::Error;
-    /// # use ht16k33::i2c_mock::I2cMock;
-    /// # use ht16k33::HT16K33;
-    /// # fn main() {
-    /// # let mut i2c = I2cMock::new();
-    /// # let address = 0u8;
-    ///
-    /// let mut ht16k33 = HT16K33::new(i2c, address);
-    /// let &buffer = ht16k33.display_buffer();
-    ///
-    /// # }
-    /// ```
-    pub fn display_buffer(&self) -> &[DisplayData; ROWS_SIZE] {
-        &self.buffer
-    }
-
-    /// Return the current oscillator state.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use failure::Error;
-    /// # use ht16k33::i2c_mock::I2cMock;
-    /// # use ht16k33::HT16K33;
-    /// # fn main() {
-    /// # let mut i2c = I2cMock::new();
-    /// # let address = 0u8;
-    ///
-    /// let mut ht16k33 = HT16K33::new(i2c, address);
-    /// let oscillator = ht16k33.oscillator();
-    ///
-    /// # }
-    /// ```
-    pub fn oscillator(&self) -> &Oscillator {
-        &self.oscillator_state
-    }
-
-    /// Return the current display state.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use failure::Error;
-    /// # use ht16k33::i2c_mock::I2cMock;
-    /// # use ht16k33::HT16K33;
-    /// # fn main() {
-    /// # let mut i2c = I2cMock::new();
-    /// # let address = 0u8;
-    ///
-    /// let mut ht16k33 = HT16K33::new(i2c, address);
-    /// let display = ht16k33.display();
-    ///
-    /// # }
-    /// ```
-    pub fn display(&self) -> &Display {
-        &self.display_state
-    }
-
-    /// Return the current dimming state.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use failure::Error;
-    /// # use ht16k33::i2c_mock::I2cMock;
-    /// # use ht16k33::HT16K33;
-    /// # fn main() {
-    /// # let mut i2c = I2cMock::new();
-    /// # let address = 0u8;
-    ///
-    /// let mut ht16k33 = HT16K33::new(i2c, address);
-    /// let dimming = ht16k33.dimming();
-    ///
-    /// # }
-    /// ```
-    pub fn dimming(&self) -> &Dimming {
-        &self.dimming_state
-    }
-
-    /// Enable/disable an LED address in the display buffer.
-    ///
-    /// The buffer must be written using [write_display_buffer()](struct.HT16K33.html#method.write_display_buffer)
-    /// for the change to be displayed.
-    ///
-    /// # Arguments
-    ///
-    /// * `location` - The LED location to update.
-    /// * `enabled` - Set the LED on (true) or off (false).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use ht16k33::i2c_mock::I2cMock;
-    /// # use ht16k33::HT16K33;
-    /// # use ht16k33::ValidationError;
-    /// use ht16k33::LedLocation;
-    /// # fn main() -> Result<(), ValidationError> {
-    /// # let mut i2c = I2cMock::new();
-    /// # let address = 0u8;
-    ///
-    /// let mut ht16k33 = HT16K33::new(i2c, address);
-    ///
-    /// let led_location = LedLocation::new(0, 0)?;
-    /// ht16k33.update_display_buffer(led_location, true);
-    ///
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn update_display_buffer(&mut self, location: LedLocation, enabled: bool) {
-        // TODO Validate `address` parameter.
-
-        // Turn on/off the specified LED.
-        self.buffer[location.row_as_index()].set(location.common, enabled);
-    }
-
-    /// Clear contents of the display buffer.
-    ///
-    /// The buffer must be written using [write_display_buffer()](struct.HT16K33.html#method.write_display_buffer)
-    /// for the change to be displayed.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use ht16k33::i2c_mock::I2cMock;
-    /// # use ht16k33::HT16K33;
-    /// # fn main() {
-    /// # let mut i2c = I2cMock::new();
-    /// # let address = 0u8;
-    ///
-    /// let mut ht16k33 = HT16K33::new(i2c, address);
-    /// ht16k33.clear_display_buffer();
-    ///
-    /// # }
-    /// ```
-    pub fn clear_display_buffer(&mut self) {
-        // TODO is there any advantage to iteration vs just assigning
-        // a new, empty `[0; ROWS_SIZE]` array?
-        for row in self.buffer.iter_mut() {
-            *row = DisplayData::COMMON_NONE;
-        }
-    }
-
     /// Control the oscillator.
     ///
     /// # Arguments
@@ -556,6 +409,154 @@ where
         }
 
         Ok(())
+    }
+}
+impl<I2C> HT16K33<I2C> {
+    /// Return the current display buffer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use failure::Error;
+    /// # use ht16k33::i2c_mock::I2cMock;
+    /// # use ht16k33::HT16K33;
+    /// # fn main() {
+    /// # let mut i2c = I2cMock::new();
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address);
+    /// let &buffer = ht16k33.display_buffer();
+    ///
+    /// # }
+    /// ```
+    pub fn display_buffer(&self) -> &[DisplayData; ROWS_SIZE] {
+        &self.buffer
+    }
+
+    /// Return the current oscillator state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use failure::Error;
+    /// # use ht16k33::i2c_mock::I2cMock;
+    /// # use ht16k33::HT16K33;
+    /// # fn main() {
+    /// # let mut i2c = I2cMock::new();
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address);
+    /// let oscillator = ht16k33.oscillator();
+    ///
+    /// # }
+    /// ```
+    pub fn oscillator(&self) -> &Oscillator {
+        &self.oscillator_state
+    }
+
+    /// Return the current display state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use failure::Error;
+    /// # use ht16k33::i2c_mock::I2cMock;
+    /// # use ht16k33::HT16K33;
+    /// # fn main() {
+    /// # let mut i2c = I2cMock::new();
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address);
+    /// let display = ht16k33.display();
+    ///
+    /// # }
+    /// ```
+    pub fn display(&self) -> &Display {
+        &self.display_state
+    }
+
+    /// Return the current dimming state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use failure::Error;
+    /// # use ht16k33::i2c_mock::I2cMock;
+    /// # use ht16k33::HT16K33;
+    /// # fn main() {
+    /// # let mut i2c = I2cMock::new();
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address);
+    /// let dimming = ht16k33.dimming();
+    ///
+    /// # }
+    /// ```
+    pub fn dimming(&self) -> &Dimming {
+        &self.dimming_state
+    }
+
+    /// Enable/disable an LED address in the display buffer.
+    ///
+    /// The buffer must be written using [write_display_buffer()](struct.HT16K33.html#method.write_display_buffer)
+    /// for the change to be displayed.
+    ///
+    /// # Arguments
+    ///
+    /// * `location` - The LED location to update.
+    /// * `enabled` - Set the LED on (true) or off (false).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use ht16k33::i2c_mock::I2cMock;
+    /// # use ht16k33::HT16K33;
+    /// # use ht16k33::ValidationError;
+    /// use ht16k33::LedLocation;
+    /// # fn main() -> Result<(), ValidationError> {
+    /// # let mut i2c = I2cMock::new();
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address);
+    ///
+    /// let led_location = LedLocation::new(0, 0)?;
+    /// ht16k33.update_display_buffer(led_location, true);
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn update_display_buffer(&mut self, location: LedLocation, enabled: bool) {
+        // TODO Validate `address` parameter.
+
+        // Turn on/off the specified LED.
+        self.buffer[location.row_as_index()].set(location.common, enabled);
+    }
+
+    /// Clear contents of the display buffer.
+    ///
+    /// The buffer must be written using [write_display_buffer()](struct.HT16K33.html#method.write_display_buffer)
+    /// for the change to be displayed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use ht16k33::i2c_mock::I2cMock;
+    /// # use ht16k33::HT16K33;
+    /// # fn main() {
+    /// # let mut i2c = I2cMock::new();
+    /// # let address = 0u8;
+    ///
+    /// let mut ht16k33 = HT16K33::new(i2c, address);
+    /// ht16k33.clear_display_buffer();
+    ///
+    /// # }
+    /// ```
+    pub fn clear_display_buffer(&mut self) {
+        // TODO is there any advantage to iteration vs just assigning
+        // a new, empty `[0; ROWS_SIZE]` array?
+        for row in self.buffer.iter_mut() {
+            *row = DisplayData::COMMON_NONE;
+        }
     }
 }
 
